@@ -2,14 +2,14 @@
 # AI MAKEFILE
 
 # 1. Name of your final executable
-TARGET = vrp_solver
+TARGET = build/vrp_solver
 
 # 2. Compiler and basic flags
 CC = gcc
 CFLAGS = -Wall -Wextra -g
 
 # 3. Automatically find all .c files in the CURRENT directory
-SRCS = $(wildcard *.c)
+SRCS = $(wildcard src/*.c)
 
 # 4. Create a list of .o files based on the .c files found
 OBJS = $(SRCS:.c=.o)
