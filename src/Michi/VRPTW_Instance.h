@@ -15,10 +15,14 @@ typedef struct {
 } Customer;
 
 typedef struct {
+    char name[9];
     int number_of_vehicles;
     int capacity_per_vehicle;
     int number_of_customers;
 
     Customer *customers;
 } VRPTW;
+
+int read_instance(VRPTW *instance, const char *file); // return 0 if it ran correctly
+void free_instance(VRPTW *instance);
 #endif //VRPTW_INSTANCE_H
