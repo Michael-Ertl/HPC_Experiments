@@ -23,4 +23,3 @@ Run the benchmarks with `make build run-benchmarks`.
 
 ## Logging
 We use [spdlog](https://github.com/gabime/spdlog).
-Logging is only enabled in a debug build.
