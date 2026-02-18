@@ -9,5 +9,11 @@ prepare-release:
 build:
 	cmake --build build -j 32 # num threads
 
+run-program:
+	./build/core
+
 run-tests:
 	./build/tests/unit_tests
+
+run-benchmarks:
+	./build/benchmarks/benchmarks

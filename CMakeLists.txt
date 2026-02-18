@@ -35,9 +35,14 @@ add_library(solver_lib
 )
 target_include_directories(solver_lib PUBLIC src/)
 target_link_libraries(solver_lib PUBLIC spdlog::spdlog)
+target_compile_definitions(solver_lib PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
 
+
+# Add the core executable to the project
+add_executable(core src/entrypoint.cpp)
+target_link_libraries(core PRIVATE solver_lib)
 
 # Add the tests and benchmarks to the project
 enable_testing()
 add_subdirectory(tests)
-# add_subdirectory(benchmarks)
+add_subdirectory(benchmarks)
