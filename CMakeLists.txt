@@ -34,9 +34,10 @@ add_library(solver_lib
         src/problem_instance.cpp
 )
 target_include_directories(solver_lib PUBLIC src/)
+target_include_directories(solver_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(solver_lib PUBLIC spdlog::spdlog)
+target_link_libraries(solver_lib PUBLIC CUDA::cuda_driver CUDA::cudart)
 target_compile_definitions(solver_lib PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
-
 
 # Add the core executable to the project
 add_executable(core src/entrypoint.cpp)
