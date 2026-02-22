@@ -1,5 +1,4 @@
 #pragma once
-
 #include "utils.h"
 
 struct Customer {
@@ -19,6 +18,6 @@ struct ProblemInstance {
     std::vector<Customer> customers;
 };
 
-ProblemInstance readInstance(const std::string &directory);
+struct ProblemInstance readInstance(const std::string &directory);
 
 std::vector<ProblemInstance> readAllInstances(const std::string &directory);

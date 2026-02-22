@@ -1,5 +1,7 @@
 .PHONY: prepare-debug, prepare-release, build
 
+debug-run: prepare-debug build run-program
+
 prepare-debug:
 	cmake -B build -DCMAKE_BUILD_TYPE=Debug
 
