@@ -1,4 +1,4 @@
-.PHONY: prepare-debug, prepare-release, build
+.PHONY: prepare-debug prepare-release build
 
 debug-run: prepare-debug build run-program
 
