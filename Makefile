@@ -18,4 +18,6 @@ run-tests:
 	./build/tests/unit_tests
 
 run-benchmarks:
-	./build/benchmarks/benchmarks
+	./build/benchmarks/benchmarks \
+	  --benchmark_perf_counters=CYCLES,INSTRUCTIONS,CACHE-MISSES,BRANCH-MISSES,STALLED-CYCLES-FRONTEND \
+	  --benchmark_counters_tabular=true

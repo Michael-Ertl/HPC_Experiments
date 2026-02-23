@@ -5,5 +5,5 @@
 #define STOCHASTICLOCALSEARCH_H
 
 #include "../problem_instance.h"
-int stochasticLocalSearch(const ProblemInstance& instance, const int iterations);
+double stochasticLocalSearch(const ProblemInstance& instance, const int iterations, bool verbose=false);
 #endif //STOCHASTICLOCALSEARCH_H
