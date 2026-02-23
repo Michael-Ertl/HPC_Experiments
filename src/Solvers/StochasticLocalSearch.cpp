@@ -10,6 +10,8 @@
 #include <limits>
 #include <random>
 #include <vector>
+#include <spdlog/spdlog.h>
+#include <iostream>
 
 struct Route {
     std::vector<int> customers;
@@ -80,16 +82,12 @@ static double evaluateSolution(
     int64_t total=0;
 
     for(Route &route:s.routes){
-
         double routeCost = evaluateRouteCost(ins,route);
-
         if(routeCost == -1){ // route infeasible
             return -1;
         }
-
         total+=routeCost;
     }
-
     return total;
 }
 
@@ -209,28 +207,52 @@ static void splitRouteMove(std::mt19937& rng, Solution& s) {
     s.routes.push_back(std::move(newR));
 }
 
+static void printSolution(
+        const ProblemInstance& ins,
+        const Solution& s,
+        bool verbose)
+{
+    if(!verbose)
+        return;
 
-static void printSolution(const ProblemInstance& ins, const Solution& s){
+    spdlog::info("Cost {}", evaluateSolution(ins,s));
 
-    std::cout<<"Cost "<< evaluateSolution(ins, s) <<"\n";
+    for(size_t k=0;k<s.routes.size();++k)
+    {
+        std::string route =
+            fmt::format("Vehicle {} : 0 ",k);
 
-    for(size_t k=0;k<s.routes.size();++k){
+        for(int c : s.routes[k].customers)
+        {
+            route +=
+              fmt::format("-> {} ",
+              ins.customers[c].id);
+        }
 
-        std::cout<<"Vehicle "<<k<<" : 0 ";
+        route += "->0";
 
-        for(int c:s.routes[k].customers)
-            std::cout<<"-> "<<ins.customers[c].id<<" ";
-
-        std::cout<<"->0\n";
+        spdlog::info("{}",route);
     }
 }
 
-int stochasticLocalSearch(const ProblemInstance& instance, const int iterations){
+
+// TODO: Change print stmts to spdlogging statements for cleaner outputs.
+// TODO: add verbose parameter so benchmarks can run without console output
+double stochasticLocalSearch(const ProblemInstance& instance, const int iterations, bool verbose){
     std::mt19937 rng(0); // random seed
 
     Solution best = stupidOneVehiclePerCustomerInit(instance);
     double bestScore =evaluateSolution(instance,best);
-    std::cout<<"\n--- SLS ---\n"<<"Initial solution:\n" <<"Score: " << bestScore << "\n";
+
+    if(verbose)
+    {
+        spdlog::info("---- SLS ----");
+        spdlog::info(
+            "Instance {} | Initial Score {}",
+            instance.name,
+            bestScore);
+    }
+
     double initialScore = bestScore;
     for(int it=0;it<iterations;++it){
         Solution neighbor=best;
@@ -262,7 +284,19 @@ int stochasticLocalSearch(const ProblemInstance& instance, const int iterations)
         }
     }
 
-    std::cout<<"\nBEST\n" << "Improvement: " << initialScore - bestScore<<"\nUsed Vehicles: "<< best.routes.size() << "/" << instance.numberOfVehicles <<"\n";
-    printSolution(instance,best);
-    return 0;
+    if(verbose)
+    {
+        spdlog::info(
+            "BEST | Improvement {}",
+            initialScore - bestScore);
+
+        spdlog::info(
+            "Vehicles {} / {}",
+            best.routes.size(),
+            instance.numberOfVehicles);
+    }
+
+    printSolution(instance,best, verbose);
+
+    return bestScore;
 }

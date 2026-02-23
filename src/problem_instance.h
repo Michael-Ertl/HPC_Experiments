@@ -18,6 +18,8 @@ struct ProblemInstance {
     std::vector<Customer> customers;
 };
 
-struct ProblemInstance readInstance(const std::string &directory);
+ProblemInstance readInstance(const std::string &directory);
+
+
 
 std::vector<ProblemInstance> readAllInstances(const std::string &directory);
