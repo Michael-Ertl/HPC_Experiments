@@ -12,6 +12,11 @@ project(hpc VERSION 1.0
 # Gather local dependencies
 find_package(CUDAToolkit REQUIRED)
 
+# OR-Tools (prebuilt binary)
+set(ORTOOLS_ROOT "${CMAKE_SOURCE_DIR}/submodules/or-tools_x86_64_Ubuntu-24.04_cpp_v9.15.6755")
+list(APPEND CMAKE_PREFIX_PATH "${ORTOOLS_ROOT}")
+find_package(ortools CONFIG REQUIRED)
+
 # Configure the test and benchmark libraries
 add_subdirectory(submodules/googletest)
 add_subdirectory(submodules/benchmark)
@@ -29,15 +34,25 @@ add_subdirectory("${SPDLOG_SUBMODULE_DIR}" EXCLUDE_FROM_ALL) # EXCLUDE_FROM_ALL 
 
 
 # Compile the src code into a static library
+option(ENABLE_DEBUG "Enable debug checks (e.g. electric fence)" OFF)
+option(ENABLE_PROFILER "Enable allocator instrumentation" OFF)
+
 add_library(solver_lib
         # Add the src cpp files here.
         src/problem_instance.cpp
+        src/allocators.cpp
 )
 target_include_directories(solver_lib PUBLIC src/)
 target_include_directories(solver_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(solver_lib PUBLIC spdlog::spdlog)
 target_link_libraries(solver_lib PUBLIC CUDA::cuda_driver CUDA::cudart)
 target_compile_definitions(solver_lib PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
+if (ENABLE_DEBUG)
+	target_compile_definitions(solver_lib PUBLIC ENABLE_DEBUG=1)
+endif()
+if (ENABLE_PROFILER)
+	target_compile_definitions(solver_lib PUBLIC ENABLE_PROFILER=1)
+endif()
 
 # Add the core executable to the project
 add_executable(core src/entrypoint.cpp)
