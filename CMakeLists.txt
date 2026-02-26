@@ -41,6 +41,7 @@ add_library(solver_lib
         # Add the src cpp files here.
         src/problem_instance.cpp
         src/allocators.cpp
+        src/Solvers/StochasticLocalSearch.cpp
 )
 target_include_directories(solver_lib PUBLIC src/)
 target_include_directories(solver_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})

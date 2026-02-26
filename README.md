@@ -20,7 +20,11 @@ Run the tests with `make build run-tests`.
 ## Benchmarking
 We use [Google Benchmark](https://github.com/google/benchmark).
 Run the benchmarks with `make build run-benchmarks`.
+- Requirements:
+  - Performance monitoring library
+  - ```sudo apt update && sudo apt install libpfm4-dev```
+  - System Access: Hardware access poses a security threat -> reducing threshhold is necessary:
+  - ```sudo sysctl -w kernel.perf_event_paranoid=-1```
 
 ## Logging
 We use [spdlog](https://github.com/gabime/spdlog).
-Logging is only enabled in a debug build.
