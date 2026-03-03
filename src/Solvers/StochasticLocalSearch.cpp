@@ -13,6 +13,12 @@
 #include <spdlog/spdlog.h>
 #include <iostream>
 
+class List {
+};
+
+class DynamicArray {
+};
+
 struct Route {
     std::vector<int> customers;
     bool changed;
@@ -173,9 +179,6 @@ static void shiftMove(std::mt19937& rng, Solution& s)
     int fromIdx = -1, toIdx;
     chooseTwoNonEmptyRoutes(rng, s, fromIdx, toIdx);
     if (fromIdx == -1) return;
-    if (fromIdx == -1) return;
-    if (fromIdx == -1) return;
-    if (fromIdx == -1) return;
     if (fromIdx == toIdx) return;
 
     Route& from = s.routes[fromIdx];
@@ -267,19 +270,34 @@ static void reorderMove(std::mt19937& rng, Solution& s)
     if (s.routes.empty()) return;
 
     // pick a route with at least 2 customers (so something meaningful can happen)
-    std::vector<int> candidates;
-    candidates.reserve(s.routes.size());
-    for (int i = 0; i < (int)s.routes.size(); ++i)
-        if ((int)s.routes[i].customers.size() >= 2)
-            candidates.push_back(i);
+    // use rejection sampling by default
+    std::uniform_int_distribution<int> rPick(0, (int)s.routes.size() - 1);
+    Route *r = nullptr;
+    for (size_t _ = 0; _ < 16; _++) {
+	    Route *nR = &s.routes[rPick(rng)];
+	    if (nR->customers.size() >= 2) {
+		    r = nR;
+		    break;
+	    }
+    }
 
-    if (candidates.empty()) return;
+    if (r == nullptr) {
+	    LOG_ERROR("this occurs");
+	std::vector<int> candidates;
+	candidates.reserve(s.routes.size());
+	for (int i = 0; i < (int)s.routes.size(); ++i)
+	if ((int)s.routes[i].customers.size() >= 2)
+	    candidates.push_back(i);
 
-    std::uniform_int_distribution<int> rPick(0, (int)candidates.size() - 1);
-    Route& r = s.routes[candidates[rPick(rng)]];
-    r.changed = true;
+	if (candidates.empty()) return;
 
-    const int n = (int)r.customers.size();
+	std::uniform_int_distribution<int> rPick(0, (int)candidates.size() - 1);
+	r = &s.routes[candidates[rPick(rng)]];
+    }
+
+    r->changed = true;
+
+    const int n = (int)r->customers.size();
     if (n < 2) return;
 
     std::uniform_int_distribution<int> startDist(0, n - 1);
@@ -288,20 +306,21 @@ static void reorderMove(std::mt19937& rng, Solution& s)
     std::uniform_int_distribution<int> lenDist(1, n - start);
     int len = lenDist(rng);
 
-    auto segBeg = r.customers.begin() + start;
+    auto segBeg = r->customers.begin() + start;
     auto segEnd = segBeg + len;
 
     std::vector<int> segment(segBeg, segEnd);
-    r.customers.erase(segBeg, segEnd);
+    r->customers.erase(segBeg, segEnd);
 
     // choose new insertion position in the shortened route
-    std::uniform_int_distribution<int> insertDist(0, (int)r.customers.size());
+    std::uniform_int_distribution<int> insertDist(0, (int)r->customers.size());
     int newPos = insertDist(rng);
 
-    r.customers.insert(r.customers.begin() + newPos, segment.begin(), segment.end());
+    r->customers.insert(r->customers.begin() + newPos, segment.begin(), segment.end());
 }
 
 
+#if false
 // initializes a solution with one vehicle per customer
 static Solution stupidOneVehiclePerCustomerInit(
         const ProblemInstance& ins){
@@ -319,7 +338,9 @@ static Solution stupidOneVehiclePerCustomerInit(
 
     return s;
 }
+#endif
 
+#if false
 // MUTATIONS OPERATIONS:
 static void mergeRoutesMove(
         std::mt19937& rng,
@@ -358,7 +379,9 @@ static void mergeRoutesMove(
 
     s.routes.erase(s.routes.begin()+b);
 }
+#endif
 
+#if false
 static void relocateMove(
         std::mt19937& rng,
         Solution& s){
@@ -391,7 +414,9 @@ static void relocateMove(
     to.changed = true;
     to.customers.insert(to.customers.begin() + insert(rng), customer);
 }
+#endif
 
+#if false
 static void splitRouteMove(std::mt19937& rng, Solution& s) {
     if (s.routes.empty()) return;
 
@@ -416,6 +441,7 @@ static void splitRouteMove(std::mt19937& rng, Solution& s) {
     r.changed = true;
     r.customers.erase(r.customers.begin() + cut, r.customers.end());
 }
+#endif
 
 static void printSolution(
         const ProblemInstance& ins,
@@ -497,7 +523,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
             // Choose the correct mutation operator
             switch(std::uniform_int_distribution op(0,4); op(rng)) {
             case 0:
-                reorderMove(rng,neighbor);
+                reorderMove(rng, neighbor);
                 break;
             case 1:
                 exchangeMove(rng,neighbor);
@@ -505,7 +531,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
             case 2:
                 shiftMove(rng,neighbor);
                 break;
-            default: exchangeMove(rng,neighbor);;
+            default: exchangeMove(rng, neighbor);
             }
             mutations++;
         }
