@@ -262,22 +262,9 @@ static void exchangeMove(std::mt19937& rng, Solution& s)
 // --- REORDER (rearrange) operator: reposition a non-empty segment within one route ---
 static void reorderMove(std::mt19937& rng, Solution& s)
 {
-    if (s.routes.empty()) return;
+	if (s.routes.empty()) return;
 
-    // pick a route with at least 2 customers (so something meaningful can happen)
-    // use rejection sampling by default
-    std::uniform_int_distribution<int> rPick(0, (int)s.routes.size() - 1);
-    Route *r = nullptr;
-    for (size_t _ = 0; _ < 16; _++) {
-	    Route *nR = &s.routes[rPick(rng)];
-	    if (nR->customers.size() >= 2) {
-		    r = nR;
-		    break;
-	    }
-    }
-
-    if (r == nullptr) {
-	    LOG_ERROR("this never occurs");
+	// pick a route with at least 2 customers (so something meaningful can happen)
 	std::vector<int> candidates;
 	candidates.reserve(s.routes.size());
 	for (int i = 0; i < (int)s.routes.size(); ++i)
@@ -288,30 +275,29 @@ static void reorderMove(std::mt19937& rng, Solution& s)
 
 	std::uniform_int_distribution<int> rPick(0, (int)candidates.size() - 1);
 	r = &s.routes[candidates[rPick(rng)]];
-    }
 
-    r->changed = true;
+	r->changed = true;
 
-    const int n = (int)r->customers.size();
-    if (n < 2) return;
+	const int n = (int)r->customers.size();
+	if (n < 2) return;
 
-    std::uniform_int_distribution<int> startDist(0, n - 1);
-    int start = startDist(rng);
+	std::uniform_int_distribution<int> startDist(0, n - 1);
+	int start = startDist(rng);
 
-    std::uniform_int_distribution<int> lenDist(1, n - start);
-    int len = lenDist(rng);
+	std::uniform_int_distribution<int> lenDist(1, n - start);
+	int len = lenDist(rng);
 
-    auto segBeg = r->customers.begin() + start;
-    auto segEnd = segBeg + len;
+	auto segBeg = r->customers.begin() + start;
+	auto segEnd = segBeg + len;
 
-    std::vector<int> segment(segBeg, segEnd);
-    r->customers.erase(segBeg, segEnd);
+	std::vector<int> segment(segBeg, segEnd);
+	r->customers.erase(segBeg, segEnd);
 
-    // choose new insertion position in the shortened route
-    std::uniform_int_distribution<int> insertDist(0, (int)r->customers.size());
-    int newPos = insertDist(rng);
+	// choose new insertion position in the shortened route
+	std::uniform_int_distribution<int> insertDist(0, (int)r->customers.size());
+	int newPos = insertDist(rng);
 
-    r->customers.insert(r->customers.begin() + newPos, segment.begin(), segment.end());
+	r->customers.insert(r->customers.begin() + newPos, segment.begin(), segment.end());
 }
 
 
