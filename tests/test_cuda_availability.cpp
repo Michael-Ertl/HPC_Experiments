@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
+#if HAVE_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
+#endif
 
 #if false
 TEST(CudaTest, DeviceZeroIsAvailable) {

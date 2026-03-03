@@ -20,6 +20,7 @@ struct Solution {
     std::vector<Route> routes;
 };
 
+
 static int32_t dist(const ProblemInstance& ins,int i,int j){
 
     const Customer &a=ins.customers[i];
@@ -30,6 +31,7 @@ static int32_t dist(const ProblemInstance& ins,int i,int j){
 
     return (int32_t)std::lround(std::sqrt(dx*dx+dy*dy));
 }
+
 
 // returns -1 on infeasible instance
 // returns total route distance/cost otherwise
@@ -90,6 +92,207 @@ static double evaluateSolution(
     }
     return total;
 }
+
+
+
+// --- Greedy init: use as few vehicles as possible (cost quality is irrelevant) ---
+static Solution greedyMinVehiclesInit(const ProblemInstance& ins)
+{
+    Solution s;
+
+    // customers are 1..n (0 is depot)
+    std::vector<int> customers;
+    customers.reserve(ins.customers.size() > 0 ? ins.customers.size() - 1 : 0);
+    for (int i = 1; i < (int)ins.customers.size(); ++i)
+        customers.push_back(i);
+
+    // Heuristic ordering biased toward fewer vehicles:
+    // pack big demands early; break ties by tighter deadlines.
+    std::sort(customers.begin(), customers.end(),
+        [&](int a, int b){
+            const auto& A = ins.customers[a];
+            const auto& B = ins.customers[b];
+            if (A.demand != B.demand) return A.demand > B.demand;
+            return A.latestLeaveTime < B.latestLeaveTime;
+        });
+
+    // First-fit append: try to put each customer into an existing route (append),
+    // otherwise open a new route. This prioritizes minimizing #routes.
+    for (int c : customers)
+    {
+        bool placed = false;
+
+        for (Route& r : s.routes)
+        {
+            r.customers.push_back(c);
+            if (evaluateRouteCost(ins, r) != -1)
+            {
+                placed = true;
+                break;
+            }
+            r.customers.pop_back();
+        }
+
+        if (!placed)
+        {
+            Route r;
+            r.customers.push_back(c);
+            s.routes.push_back(std::move(r));
+        }
+    }
+
+    // remove any accidental empty routes (shouldn't happen, but keep it clean)
+    s.routes.erase(
+        std::remove_if(s.routes.begin(), s.routes.end(),
+            [](const Route& r){ return r.customers.empty(); }),
+        s.routes.end());
+
+    return s;
+}
+
+// --- SHIFT operator: move a non-empty segment from one route to another ---
+static void shiftMove(std::mt19937& rng, Solution& s)
+{
+    if (s.routes.size() < 2) return;
+
+    // collect indices of non-empty routes
+    std::vector<int> nonEmpty;
+    nonEmpty.reserve(s.routes.size());
+    for (int i = 0; i < (int)s.routes.size(); ++i)
+        if (!s.routes[i].customers.empty())
+            nonEmpty.push_back(i);
+
+    if (nonEmpty.size() < 2) return;
+
+    std::uniform_int_distribution<int> rPick(0, (int)nonEmpty.size() - 1);
+    int fromIdx = nonEmpty[rPick(rng)];
+    int toIdx   = nonEmpty[rPick(rng)];
+    if (fromIdx == toIdx) return;
+
+    Route& from = s.routes[fromIdx];
+    Route& to   = s.routes[toIdx];
+
+    const int nFrom = (int)from.customers.size();
+    if (nFrom <= 0) return;
+
+    std::uniform_int_distribution<int> startDist(0, nFrom - 1);
+    int start = startDist(rng);
+
+    std::uniform_int_distribution<int> lenDist(1, nFrom - start);
+    int len = lenDist(rng);
+
+    auto segBegin = from.customers.begin() + start;
+    auto segEnd   = segBegin + len;
+
+    std::vector<int> segment(segBegin, segEnd);
+    from.customers.erase(segBegin, segEnd);
+
+    std::uniform_int_distribution<int> insertDist(0, (int)to.customers.size());
+    int insertPos = insertDist(rng);
+    to.customers.insert(to.customers.begin() + insertPos, segment.begin(), segment.end());
+
+    // remove empty routes to keep vehicle count minimal
+    s.routes.erase(
+        std::remove_if(s.routes.begin(), s.routes.end(),
+            [](const Route& r){ return r.customers.empty(); }),
+        s.routes.end());
+}
+
+// --- EXCHANGE operator: swap two non-empty segments between two routes ---
+static void exchangeMove(std::mt19937& rng, Solution& s)
+{
+    if (s.routes.size() < 2) return;
+
+    std::vector<int> nonEmpty;
+    nonEmpty.reserve(s.routes.size());
+    for (int i = 0; i < (int)s.routes.size(); ++i)
+        if (!s.routes[i].customers.empty())
+            nonEmpty.push_back(i);
+
+    if (nonEmpty.size() < 2) return;
+
+    std::uniform_int_distribution<int> rPick(0, (int)nonEmpty.size() - 1);
+    int aIdx = nonEmpty[rPick(rng)];
+    int bIdx = nonEmpty[rPick(rng)];
+    if (aIdx == bIdx) return;
+
+    Route& A = s.routes[aIdx];
+    Route& B = s.routes[bIdx];
+
+    const int nA = (int)A.customers.size();
+    const int nB = (int)B.customers.size();
+    if (nA == 0 || nB == 0) return;
+
+    std::uniform_int_distribution<int> aStartDist(0, nA - 1);
+    int aStart = aStartDist(rng);
+    std::uniform_int_distribution<int> aLenDist(1, nA - aStart);
+    int aLen = aLenDist(rng);
+
+    std::uniform_int_distribution<int> bStartDist(0, nB - 1);
+    int bStart = bStartDist(rng);
+    std::uniform_int_distribution<int> bLenDist(1, nB - bStart);
+    int bLen = bLenDist(rng);
+
+    auto aBeg = A.customers.begin() + aStart;
+    auto aEnd = aBeg + aLen;
+    auto bBeg = B.customers.begin() + bStart;
+    auto bEnd = bBeg + bLen;
+
+    std::vector<int> segA(aBeg, aEnd);
+    std::vector<int> segB(bBeg, bEnd);
+
+    A.customers.erase(aBeg, aEnd);
+    B.customers.erase(bBeg, bEnd);
+
+    // insert swapped segments at the original start positions
+    A.customers.insert(A.customers.begin() + aStart, segB.begin(), segB.end());
+    B.customers.insert(B.customers.begin() + bStart, segA.begin(), segA.end());
+
+    s.routes.erase(
+        std::remove_if(s.routes.begin(), s.routes.end(),
+            [](const Route& r){ return r.customers.empty(); }),
+        s.routes.end());
+}
+
+// --- REORDER (rearrange) operator: reposition a non-empty segment within one route ---
+static void reorderMove(std::mt19937& rng, Solution& s)
+{
+    if (s.routes.empty()) return;
+
+    // pick a route with at least 2 customers (so something meaningful can happen)
+    std::vector<int> candidates;
+    candidates.reserve(s.routes.size());
+    for (int i = 0; i < (int)s.routes.size(); ++i)
+        if ((int)s.routes[i].customers.size() >= 2)
+            candidates.push_back(i);
+
+    if (candidates.empty()) return;
+
+    std::uniform_int_distribution<int> rPick(0, (int)candidates.size() - 1);
+    Route& r = s.routes[candidates[rPick(rng)]];
+
+    const int n = (int)r.customers.size();
+    if (n < 2) return;
+
+    std::uniform_int_distribution<int> startDist(0, n - 1);
+    int start = startDist(rng);
+
+    std::uniform_int_distribution<int> lenDist(1, n - start);
+    int len = lenDist(rng);
+
+    auto segBeg = r.customers.begin() + start;
+    auto segEnd = segBeg + len;
+
+    std::vector<int> segment(segBeg, segEnd);
+    r.customers.erase(segBeg, segEnd);
+
+    // choose new insertion position in the shortened route
+    std::uniform_int_distribution<int> insertDist(0, (int)r.customers.size());
+    int newPos = insertDist(rng);
+
+    r.customers.insert(r.customers.begin() + newPos, segment.begin(), segment.end());
+}
+
 
 // initializes a solution with one vehicle per customer
 static Solution stupidOneVehiclePerCustomerInit(
@@ -241,7 +444,7 @@ static void printSolution(
 double stochasticLocalSearch(const ProblemInstance& instance, const int iterations, bool verbose){
     std::mt19937 rng(0); // random seed
 
-    Solution best = stupidOneVehiclePerCustomerInit(instance);
+    Solution best = greedyMinVehiclesInit(instance);
     double bestScore =evaluateSolution(instance,best);
 
     if(verbose)
@@ -260,15 +463,15 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
         // Choose the correct mutation operator
         switch(std::uniform_int_distribution op(0,4); op(rng)) {
             case 0:
-                mergeRoutesMove(rng,neighbor);
+                reorderMove(rng,neighbor);
                 break;
             case 1:
-                splitRouteMove(rng,neighbor);
+                exchangeMove(rng,neighbor);
                 break;
             case 2:
-                relocateMove(rng,neighbor);
+                shiftMove(rng,neighbor);
                 break;
-            default: relocateMove(rng,neighbor);;
+            default: exchangeMove(rng,neighbor);;
         }
 
         // Evaluate the neighbor
@@ -287,7 +490,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
     if(verbose)
     {
         spdlog::info(
-            "BEST | Improvement {}",
+            "Best Score {} | Improvement {}",bestScore,
             initialScore - bestScore);
 
         spdlog::info(

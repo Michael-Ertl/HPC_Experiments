@@ -4,6 +4,8 @@
 #include "./Solvers/StochasticLocalSearch.h"
 #include "./problem_instance.h"
 #include <spdlog/spdlog.h>
+
+
 int main() {
     spdlog::flush_on(spdlog::level::trace);
     spdlog::set_level(spdlog::level::trace);

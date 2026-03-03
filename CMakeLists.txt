@@ -10,7 +10,8 @@ project(hpc VERSION 1.0
         LANGUAGES C CXX)
 
 # Gather local dependencies
-find_package(CUDAToolkit REQUIRED)
+find_package(CUDAToolkit QUIET)
+#find_package(CUDAToolkit REQUIRED)
 
 # OR-Tools (prebuilt binary)
 set(ORTOOLS_ROOT "${CMAKE_SOURCE_DIR}/submodules/or-tools_x86_64_Ubuntu-24.04_cpp_v9.15.6755")
@@ -44,10 +45,25 @@ add_library(solver_lib
         src/Solvers/StochasticLocalSearch.cpp
 )
 target_include_directories(solver_lib PUBLIC src/)
-target_include_directories(solver_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
+#target_include_directories(solver_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(solver_lib PUBLIC spdlog::spdlog)
-target_link_libraries(solver_lib PUBLIC CUDA::cuda_driver CUDA::cudart)
+#target_link_libraries(solver_lib PUBLIC CUDA::cuda_driver CUDA::cudart)
 target_compile_definitions(solver_lib PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
+
+
+if (CUDAToolkit_FOUND)
+	message(STATUS "CUDA found — enabling CUDA support")
+
+	target_include_directories(solver_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
+	target_link_libraries(solver_lib PUBLIC CUDA::cuda_driver CUDA::cudart)
+	target_compile_definitions(solver_lib PUBLIC HAVE_CUDA=1)
+else()
+	message(STATUS "CUDA not found — building without CUDA support")
+	target_compile_definitions(solver_lib PUBLIC HAVE_CUDA=0)
+endif()
+
+
+
 if (ENABLE_DEBUG)
 	target_compile_definitions(solver_lib PUBLIC ENABLE_DEBUG=1)
 endif()
