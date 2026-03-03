@@ -455,13 +455,17 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
             instance.name,
             bestScore);
     }
-
+    int mutations = 0;
+    int mutStrenght = 1;
     double initialScore = bestScore;
     for(int it=0;it<iterations;++it){
         Solution neighbor=best;
 
-        // Choose the correct mutation operator
-        switch(std::uniform_int_distribution op(0,4); op(rng)) {
+
+        for (int i = 0; i < mutStrenght;++i)
+        {
+            // Choose the correct mutation operator
+            switch(std::uniform_int_distribution op(0,4); op(rng)) {
             case 0:
                 reorderMove(rng,neighbor);
                 break;
@@ -472,7 +476,10 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
                 shiftMove(rng,neighbor);
                 break;
             default: exchangeMove(rng,neighbor);;
+            }
+            mutations++;
         }
+
 
         // Evaluate the neighbor
         double score = evaluateSolution(instance, neighbor);
@@ -484,6 +491,10 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
         if (score <= bestScore){
             best=std::move(neighbor);
             bestScore = score;
+            mutStrenght = std::min(iterations, mutStrenght * 2);
+        } else
+        {
+            mutStrenght = std::max(1, mutStrenght / 2);
         }
     }
 
@@ -492,6 +503,9 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
         spdlog::info(
             "Best Score {} | Improvement {}",bestScore,
             initialScore - bestScore);
+
+        spdlog::info (
+            "Iterations {} | Mutations {}", iterations, mutations);
 
         spdlog::info(
             "Vehicles {} / {}",
