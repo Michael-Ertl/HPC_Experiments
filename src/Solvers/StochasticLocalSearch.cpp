@@ -207,10 +207,7 @@ static void shiftMove(std::mt19937& rng, Solution& s)
     to.customers.insert(to.customers.begin() + insertPos, segment.begin(), segment.end());
 
     // remove empty routes to keep vehicle count minimal
-    s.routes.erase(
-        std::remove_if(s.routes.begin(), s.routes.end(),
-            [](const Route& r){ return r.customers.empty(); }),
-        s.routes.end());
+    if (from.customers.empty()) s.routes.erase(s.routes.begin() + fromIdx);
 }
 
 // --- EXCHANGE operator: swap two non-empty segments between two routes ---
