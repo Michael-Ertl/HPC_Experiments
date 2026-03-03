@@ -258,10 +258,8 @@ static void exchangeMove(std::mt19937& rng, Solution& s)
     A.customers.insert(A.customers.begin() + aStart, segB.begin(), segB.end());
     B.customers.insert(B.customers.begin() + bStart, segA.begin(), segA.end());
 
-    s.routes.erase(
-        std::remove_if(s.routes.begin(), s.routes.end(),
-            [](const Route& r){ return r.customers.empty(); }),
-        s.routes.end());
+    if (A.customers.empty()) s.routes.erase(s.routes.begin() + aIdx);
+    if (B.customers.empty()) s.routes.erase(s.routes.begin() + bIdx);
 }
 
 // --- REORDER (rearrange) operator: reposition a non-empty segment within one route ---
@@ -282,7 +280,7 @@ static void reorderMove(std::mt19937& rng, Solution& s)
     }
 
     if (r == nullptr) {
-	    LOG_ERROR("this occurs");
+	    LOG_ERROR("this never occurs");
 	std::vector<int> candidates;
 	candidates.reserve(s.routes.size());
 	for (int i = 0; i < (int)s.routes.size(); ++i)
