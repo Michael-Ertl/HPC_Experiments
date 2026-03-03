@@ -21,22 +21,11 @@ struct Solution {
 };
 
 
-static int32_t dist(const ProblemInstance& ins,int i,int j){
-
-    const Customer &a=ins.customers[i];
-    const Customer &b=ins.customers[j];
-
-    double dx=a.x-b.x;
-    double dy=a.y-b.y;
-
-    return (int32_t)std::lround(std::sqrt(dx*dx+dy*dy));
-}
-
-
 // returns -1 on infeasible instance
 // returns total route distance/cost otherwise
 static double evaluateRouteCost(
         const ProblemInstance& instance,
+	int32_t *dist_mat,
         const Route& route){
 
     int depotIdx=0;
@@ -54,7 +43,7 @@ static double evaluateRouteCost(
         if(load > instance.capacityPerVehicle)
             return -1; // this instance is infeasible, since a single vehicle cannot serve a customer
 
-        double travelDistance = dist(instance,previousVisitIdx,customerIdx);
+        double travelDistance = dist_mat[previousVisitIdx * instance.customers.size() + customerIdx];
 
         double arrival=time+travelDistance; // time == eunclidean distance in solomon benchmarks
 
@@ -70,7 +59,7 @@ static double evaluateRouteCost(
         previousVisitIdx=customerIdx;
     }
 
-    distanceSum+=dist(instance,previousVisitIdx,depotIdx); // return to depot
+    distanceSum+=dist_mat[previousVisitIdx * instance.customers.size() + depotIdx]; // return to depot
 
     return distanceSum;
 }
@@ -79,12 +68,13 @@ static double evaluateRouteCost(
 // returns total fleetCost otherwise
 static double evaluateSolution(
         const ProblemInstance& ins,
+	int32_t *dist_mat,
         Solution s){
 
     int64_t total=0;
 
     for(Route &route:s.routes){
-        double routeCost = evaluateRouteCost(ins,route);
+        double routeCost = evaluateRouteCost(ins, dist_mat, route);
         if(routeCost == -1){ // route infeasible
             return -1;
         }
@@ -96,7 +86,7 @@ static double evaluateSolution(
 
 
 // --- Greedy init: use as few vehicles as possible (cost quality is irrelevant) ---
-static Solution greedyMinVehiclesInit(const ProblemInstance& ins)
+static Solution greedyMinVehiclesInit(const ProblemInstance& ins, int32_t *dist_mat)
 {
     Solution s;
 
@@ -125,7 +115,7 @@ static Solution greedyMinVehiclesInit(const ProblemInstance& ins)
         for (Route& r : s.routes)
         {
             r.customers.push_back(c);
-            if (evaluateRouteCost(ins, r) != -1)
+            if (evaluateRouteCost(ins, dist_mat, r) != -1)
             {
                 placed = true;
                 break;
@@ -412,13 +402,14 @@ static void splitRouteMove(std::mt19937& rng, Solution& s) {
 
 static void printSolution(
         const ProblemInstance& ins,
+	int32_t *dist_mat,
         const Solution& s,
         bool verbose)
 {
     if(!verbose)
         return;
 
-    spdlog::info("Cost {}", evaluateSolution(ins,s));
+    spdlog::info("Cost {}", evaluateSolution(ins, dist_mat, s));
 
     for(size_t k=0;k<s.routes.size();++k)
     {
@@ -438,14 +429,36 @@ static void printSolution(
     }
 }
 
+static int32_t dist(const ProblemInstance& ins,int i,int j){
+
+    const Customer &a=ins.customers[i];
+    const Customer &b=ins.customers[j];
+
+    double dx=a.x-b.x;
+    double dy=a.y-b.y;
+
+    return (int32_t)std::lround(std::sqrt(dx*dx+dy*dy));
+}
+
+static void init_dist_mat(const ProblemInstance &ins, int32_t *dist_mat, size_t num_customers) {
+    for (size_t i = 0; i < num_customers; i++) {
+	for (size_t j = 0; j < num_customers; j++) {
+		dist_mat[i * num_customers + j] = dist(ins, i, j);
+	}
+    }
+}
 
 // TODO: Change print stmts to spdlogging statements for cleaner outputs.
 // TODO: add verbose parameter so benchmarks can run without console output
 double stochasticLocalSearch(const ProblemInstance& instance, const int iterations, bool verbose){
     std::mt19937 rng(0); // random seed
+   
+    size_t num_customers = instance.customers.size();
+    int32_t *dist_mat = new int32_t[num_customers * num_customers];
+    init_dist_mat(instance, dist_mat, num_customers);
 
-    Solution best = greedyMinVehiclesInit(instance);
-    double bestScore =evaluateSolution(instance,best);
+    Solution best = greedyMinVehiclesInit(instance, dist_mat);
+    double bestScore =evaluateSolution(instance, dist_mat, best);
 
     if(verbose)
     {
@@ -482,7 +495,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 
 
         // Evaluate the neighbor
-        double score = evaluateSolution(instance, neighbor);
+        double score = evaluateSolution(instance, dist_mat, neighbor);
         if (score == -1) {
             // infeasible candidate => continue
             continue;
@@ -513,7 +526,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
             instance.numberOfVehicles);
     }
 
-    printSolution(instance,best, verbose);
+    printSolution(instance, dist_mat, best, verbose);
 
     return bestScore;
 }
