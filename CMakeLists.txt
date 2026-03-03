@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.28)
 set(CMAKE_GENERATOR Ninja)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -fno-omit-frame-pointer -mavx2 -mf16c")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math -mavx2 -mf16c")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math -march=native -mtune=native")
 project(hpc VERSION 1.0
         DESCRIPTION "A hpc experiment regarding the Vehicle Routing Problem with Time Windows."
         LANGUAGES C CXX)
