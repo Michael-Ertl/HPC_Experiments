@@ -154,23 +154,28 @@ static Solution greedyMinVehiclesInit(const ProblemInstance& ins, int32_t *dist_
     return s;
 }
 
+void chooseTwoNonEmptyRoutes(std::mt19937 &rng, Solution &s, int &aIdx, int &bIdx) { 
+	// NOTE(Erik): No route can every be empty! That invariant must be respected.
+
+	if (s.routes.size() < 2) return;
+
+	std::uniform_int_distribution<int> rPick(0, (int)s.routes.size() - 1);
+	aIdx = rPick(rng);
+	bIdx = rPick(rng);
+}
+
 // --- SHIFT operator: move a non-empty segment from one route to another ---
 static void shiftMove(std::mt19937& rng, Solution& s)
 {
     if (s.routes.size() < 2) return;
 
     // collect indices of non-empty routes
-    std::vector<int> nonEmpty;
-    nonEmpty.reserve(s.routes.size());
-    for (int i = 0; i < (int)s.routes.size(); ++i)
-        if (!s.routes[i].customers.empty())
-            nonEmpty.push_back(i);
-
-    if (nonEmpty.size() < 2) return;
-
-    std::uniform_int_distribution<int> rPick(0, (int)nonEmpty.size() - 1);
-    int fromIdx = nonEmpty[rPick(rng)];
-    int toIdx   = nonEmpty[rPick(rng)];
+    int fromIdx = -1, toIdx;
+    chooseTwoNonEmptyRoutes(rng, s, fromIdx, toIdx);
+    if (fromIdx == -1) return;
+    if (fromIdx == -1) return;
+    if (fromIdx == -1) return;
+    if (fromIdx == -1) return;
     if (fromIdx == toIdx) return;
 
     Route& from = s.routes[fromIdx];
@@ -210,17 +215,9 @@ static void exchangeMove(std::mt19937& rng, Solution& s)
 {
     if (s.routes.size() < 2) return;
 
-    std::vector<int> nonEmpty;
-    nonEmpty.reserve(s.routes.size());
-    for (int i = 0; i < (int)s.routes.size(); ++i)
-        if (!s.routes[i].customers.empty())
-            nonEmpty.push_back(i);
-
-    if (nonEmpty.size() < 2) return;
-
-    std::uniform_int_distribution<int> rPick(0, (int)nonEmpty.size() - 1);
-    int aIdx = nonEmpty[rPick(rng)];
-    int bIdx = nonEmpty[rPick(rng)];
+    int aIdx = -1, bIdx;
+    chooseTwoNonEmptyRoutes(rng, s, aIdx, bIdx);
+    if (aIdx == -1) return;
     if (aIdx == bIdx) return;
 
     Route& A = s.routes[aIdx];
