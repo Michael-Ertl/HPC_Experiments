@@ -15,6 +15,8 @@
 
 struct Route {
     std::vector<int> customers;
+    bool changed;
+    double lastCost;
 };
 struct Solution {
     std::vector<Route> routes;
@@ -73,11 +75,19 @@ static double evaluateSolution(
 
     int64_t total=0;
 
-    for(Route &route:s.routes){
-        double routeCost = evaluateRouteCost(ins, dist_mat, route);
-        if(routeCost == -1){ // route infeasible
-            return -1;
-        }
+    for(Route &route:s.routes) {
+	double routeCost = 0;
+	if (route.changed) {
+		routeCost = evaluateRouteCost(ins, dist_mat, route);
+		if(routeCost == -1){ // route infeasible
+		    return -1;
+		}
+
+		route.changed = false;
+		route.lastCost = routeCost;
+	} else {
+		routeCost = route.lastCost;
+	}
         total+=routeCost;
     }
     return total;
@@ -125,7 +135,11 @@ static Solution greedyMinVehiclesInit(const ProblemInstance& ins, int32_t *dist_
 
         if (!placed)
         {
-            Route r;
+            Route r = {
+		    .customers = {},
+		    .changed = true,
+		    .lastCost = 0.0
+	    };
             r.customers.push_back(c);
             s.routes.push_back(std::move(r));
         }
@@ -164,6 +178,9 @@ static void shiftMove(std::mt19937& rng, Solution& s)
 
     const int nFrom = (int)from.customers.size();
     if (nFrom <= 0) return;
+
+    from.changed = true;
+    to.changed = true;
 
     std::uniform_int_distribution<int> startDist(0, nFrom - 1);
     int start = startDist(rng);
@@ -208,6 +225,9 @@ static void exchangeMove(std::mt19937& rng, Solution& s)
 
     Route& A = s.routes[aIdx];
     Route& B = s.routes[bIdx];
+
+    A.changed = true;
+    B.changed = true;
 
     const int nA = (int)A.customers.size();
     const int nB = (int)B.customers.size();
@@ -260,6 +280,7 @@ static void reorderMove(std::mt19937& rng, Solution& s)
 
     std::uniform_int_distribution<int> rPick(0, (int)candidates.size() - 1);
     Route& r = s.routes[candidates[rPick(rng)]];
+    r.changed = true;
 
     const int n = (int)r.customers.size();
     if (n < 2) return;
@@ -325,19 +346,20 @@ static void mergeRoutesMove(
         return;
 
     // random prepend or append
-    if(rng()%2)
+    A.changed = true;
+    if(rng()%2) {
         A.customers.insert(
             A.customers.end(),
             B.customers.begin(),
             B.customers.end());
-    else
+    } else {
         A.customers.insert(
             A.customers.begin(),
             B.customers.begin(),
             B.customers.end());
+    }
 
-    s.routes.erase(
-        s.routes.begin()+b);
+    s.routes.erase(s.routes.begin()+b);
 }
 
 static void relocateMove(
@@ -361,23 +383,16 @@ static void relocateMove(
 
     int idx=posFrom(rng);
 
-    int customer =
-        from.customers[idx];
+    int customer = from.customers[idx];
 
-    from.customers.erase(
-        from.customers.begin()+idx);
+    from.changed = true;
+    from.customers.erase(from.customers.begin()+idx);
 
-    Route& to =
-        s.routes[rDist(rng)];
+    Route& to = s.routes[rDist(rng)];
 
-    std::uniform_int_distribution<int>
-        insert(
-            0,
-            to.customers.size());
-
-    to.customers.insert(
-        to.customers.begin()+insert(rng),
-        customer);
+    std::uniform_int_distribution<int> insert( 0, to.customers.size());
+    to.changed = true;
+    to.customers.insert(to.customers.begin() + insert(rng), customer);
 }
 
 static void splitRouteMove(std::mt19937& rng, Solution& s) {
@@ -393,11 +408,16 @@ static void splitRouteMove(std::mt19937& rng, Solution& s) {
     std::uniform_int_distribution<int> cutDist(1, (int)r.customers.size() - 1);
     int cut = cutDist(rng);
 
-    Route newR;
+    Route newR = {
+	    .customers = {},
+	    .changed = true,
+	    .lastCost = 0.0
+    };
     newR.customers.assign(r.customers.begin() + cut, r.customers.end());
-    r.customers.erase(r.customers.begin() + cut, r.customers.end());
-
     s.routes.push_back(std::move(newR));
+
+    r.changed = true;
+    r.customers.erase(r.customers.begin() + cut, r.customers.end());
 }
 
 static void printSolution(
