@@ -33,10 +33,15 @@ set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(SPDLOG_BUILD_PIC ON CACHE BOOL "" FORCE)
 add_subdirectory("${SPDLOG_SUBMODULE_DIR}" EXCLUDE_FROM_ALL) # EXCLUDE_FROM_ALL means it doesn't compile unless the lib is linked into the program.
 
-
 # Compile the src code into a static library
 option(ENABLE_DEBUG "Enable debug checks (e.g. electric fence)" OFF)
 option(ENABLE_PROFILER "Enable allocator instrumentation" OFF)
+option(ENABLE_TRACY "Enable tracy instrumentation" OFF)
+
+if (ENABLE_TRACY)
+	# Configure the tracing library
+	add_subdirectory(submodules/tracy EXCLUDE_FROM_ALL)
+endif()
 
 add_library(solver_lib
         # Add the src cpp files here.
@@ -50,6 +55,10 @@ target_link_libraries(solver_lib PUBLIC spdlog::spdlog)
 #target_link_libraries(solver_lib PUBLIC CUDA::cuda_driver CUDA::cudart)
 target_compile_definitions(solver_lib PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
 
+if (ENABLE_TRACY)
+    target_link_libraries(solver_lib PUBLIC Tracy::TracyClient)
+    target_compile_definitions(solver_lib PUBLIC TRACY_ENABLE=1)
+endif()
 
 if (CUDAToolkit_FOUND)
 	message(STATUS "CUDA found — enabling CUDA support")

@@ -28,3 +28,11 @@ Run the benchmarks with `make build run-benchmarks`.
 
 ## Logging
 We use [spdlog](https://github.com/gabime/spdlog).
+
+## Instrumentation Profiling
+We use [tracy]().
+```
+cmake -B profiler/build -S profiler -DCMAKE_BUILD_TYPE=Release
+cmake --build profiler/build --parallel
+```
+

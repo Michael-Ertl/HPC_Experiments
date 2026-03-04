@@ -7,6 +7,7 @@
 #include "../array.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -360,7 +361,7 @@ static void init_dist_mat(const ProblemInstance &ins, int32_t *dist_mat, size_t 
 
 // TODO: Change print stmts to spdlogging statements for cleaner outputs.
 // TODO: add verbose parameter so benchmarks can run without console output
-double stochasticLocalSearch(const ProblemInstance& instance, const int iterations, bool verbose){
+double stochasticLocalSearch(const ProblemInstance& instance, const double timeLimitSeconds, bool verbose){
 	std::mt19937 rng(0); // random seed
 	
 	using A1 = Freelist<Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>;
@@ -393,7 +394,18 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 	int mutations = 0;
 	int mutStrength = 1;
 	double initialScore = bestScore;
-	for(int it=0;it<iterations;++it) {
+	
+	auto startTime = std::chrono::high_resolution_clock::now();
+	int iterationCount = 0;
+	
+	while (true) {
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> elapsed = currentTime - startTime;
+		if (elapsed.count() >= timeLimitSeconds) {
+			break;
+		}
+		
+		iterationCount++;
 		Solution neighbor = best;
 
 		for (int i = 0; i < mutStrength;++i)
@@ -426,7 +438,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 		if (score <= bestScore){
 			best=std::move(neighbor);
 			bestScore = score;
-			mutStrength = std::min(iterations, mutStrength * 2);
+			mutStrength = std::min(1000, mutStrength * 2);
 		} else {
 			mutStrength = std::max(1, mutStrength / 2);
 		}
@@ -439,7 +451,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 		initialScore - bestScore);
 
 		spdlog::info (
-		"Iterations {} | Mutations {}", iterations, mutations);
+		"Time {:.3f}s | Iterations {} | Mutations {}", timeLimitSeconds, iterationCount, mutations);
 
 		spdlog::info(
 		"Vehicles {} / {}",

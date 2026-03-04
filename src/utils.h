@@ -8,6 +8,7 @@
 #include <variant>
 
 #include "spdlog/spdlog.h"
+#include <tracy/Tracy.hpp>
 
 using u8 = uint8_t;
 using u16 = uint16_t;
