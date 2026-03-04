@@ -248,22 +248,12 @@ static void exchangeMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
     std::uniform_int_distribution<size_t> bLenDist(1, nB - bStart);
     size_t bLen = bLenDist(rng);
 
-    DynamicArray<TmpAllocator, u16> segA(tmpAlloc, aLen);
-    for (size_t i = 0; i < aLen; ++i) {
-        segA.pushBack(A.customers[aStart + i]);
-    }
-
-    DynamicArray<TmpAllocator, u16> segB(tmpAlloc, bLen);
-    for (size_t i = 0; i < bLen; ++i) {
-        segB.pushBack(B.customers[bStart + i]);
-    }
-
-    A.customers.eraseRange(aStart, aStart + aLen);
-    B.customers.eraseRange(bStart, bStart + bLen);
-
+    // do a swap without temporary memory
     // insert swapped segments at the original start positions
-    A.customers.insertRangeAt(aStart, segB, 0, segB.size());
-    B.customers.insertRangeAt(bStart, segA, 0, segA.size());
+    A.customers.insertRangeAt(aStart, B.customers, bStart, bStart + bLen);
+    B.customers.insertRangeAt(bStart, A.customers, aStart + bLen, aStart + bLen + aLen);
+    A.customers.eraseRange(aStart + bLen, aStart + bLen + aLen);
+    B.customers.eraseRange(bStart + aLen, bStart + aLen + bLen);
 
     if (A.customers.empty() || B.customers.empty()) {
         if (aIdx > bIdx) {
