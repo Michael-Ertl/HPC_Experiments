@@ -46,6 +46,10 @@ struct TypedBlock {
 			.size = size
 		};
 	}
+
+	bool operator==(const TypedBlock<T> &other) {
+		return ptr == other.ptr && size == other.size;
+	}
 };
 
 using Block = TypedBlock<u8>;
@@ -60,6 +64,8 @@ using Block = TypedBlock<u8>;
 
 class FailureStub {
 public:
+	static constexpr bool HAS_INFINITE_FALLBACK = true; // NOTE(Erik): Obviously this shouldn't be used in production.
+
 	FailureStub() = default;
 	FailureStub(const FailureStub &) = delete;
 	static constexpr size_t goodSize(size_t size) {
@@ -77,6 +83,7 @@ public:
 
 class Malloc {
 public:
+	static constexpr bool HAS_INFINITE_FALLBACK = true;
 	static constexpr size_t alignment = alignof(std::max_align_t);
 
 	static constexpr size_t goodSize(size_t size) {
@@ -113,6 +120,7 @@ class Contiguous {
 	size_t used = 0;
 
 public:
+	static constexpr bool HAS_INFINITE_FALLBACK = false;
 	static constexpr size_t alignment = alignof(std::max_align_t);
 
 	static constexpr size_t goodSize(size_t size) {
@@ -152,6 +160,10 @@ public:
 		return false;
 	}
 
+	void reallocate(Block &block, size_t newSize) {
+		block = allocate(newSize);
+	}
+
 	bool owns(Block block) {
 		return memory.array <= block.ptr && block.ptr < memory.array + used;
 	}
@@ -180,6 +192,7 @@ template<class P, class S> class Fallback {
 
 public:
 	static_assert(P::alignment == S::alignment);
+	static constexpr bool HAS_INFINITE_FALLBACK = S::HAS_INFINITE_FALLBACK;
 	static constexpr size_t alignment = P::alignment;
 
 	static constexpr size_t goodSize(size_t size) {
@@ -216,8 +229,16 @@ public:
 
 	void reallocate(Block &block, size_t newSize) {
 		if (p.owns(block)) {
-			p.reallocate(block, newSize);
-			return;
+			Block reallocBlock = block;
+			p.reallocate(reallocBlock, newSize);
+
+			if (reallocBlock.ptr == nullptr) {
+				block = s.allocate(newSize);
+				assert(s.owns(block));
+			} else {
+				block = reallocBlock;
+				return;
+			}
 		}
 #if ENABLE_DEBUG
 		if (!s.owns(block)) {
@@ -253,6 +274,7 @@ class Segregator {
 	LargeAllocator &l;
 
 public:
+	static constexpr bool HAS_INFINITE_FALLBACK = SmallAllocator::HAS_INFINITE_FALLBACK && LargeAllocator::HAS_INFINITE_FALLBACK;
 	static_assert(SmallAllocator::alignment == LargeAllocator::alignment);
 	static constexpr size_t alignment = SmallAllocator::alignment;
 
@@ -334,6 +356,7 @@ class Freelist : public Storage<A> {
 	struct Node { Node *next; } *root = nullptr;
 
 public:
+	static constexpr bool HAS_INFINITE_FALLBACK = A::HAS_INFINITE_FALLBACK;
 	static constexpr size_t alignment = A::alignment;
 
 	static constexpr size_t goodSize(size_t size) {
@@ -436,20 +459,22 @@ public:
 	void deallocate(Block block) { DEALLOCATE_NULL_CHECK(block); a.deallocate(block); } \
 	void deallocateAll() { a.deallocateAll(); }
 
+template<class A>
+concept ElectricFenceAllocator = A::HAS_INFINITE_FALLBACK;
+
 /**
- *
  * If debug mode is disabled, this just falls through to the parent.
  */
-template<class A, template<class> class Storage = RefStorage> 
-class ElectricFence : public Storage<A>{
+template<ElectricFenceAllocator A, template<class> class Storage = RefStorage> 
+class ElectricFence : public Storage<A> {
 	using Storage<A>::a;
 
 public:
-	ElectricFence() {}
 	ElectricFence(const ElectricFence &) = delete;
 	ElectricFence(ElectricFence &&) = default;
 #if ENABLE_DEBUG
 
+	static constexpr bool HAS_INFINITE_FALLBACK = A::HAS_INFINITE_FALLBACK;
 	static constexpr u8 alignment = A::alignment;
 	static constexpr u8 dAlignment = 2 * alignment;
 	static constexpr u8 startFenceByte = 0xf8;
@@ -460,6 +485,27 @@ public:
 	}
 
 	Block allocateAllBlock;
+	std::vector<Block> *allocList; // NOTE(Erik): Intentional memory leak. At the level of memory allocators, proper move/copy semantics are not implemented for non-trivial types like std::vector . So the only way to make this work is to make the allocation list on the heap and leak the container.
+
+	template<typename... Args>
+	ElectricFence(Args&&... args) : Storage<A>(std::forward<Args>(args)...) {
+		allocList = new std::vector<Block>();
+		LOG_INFO("ElectricFence enabled.");
+	}
+
+	Block getBlockWithFence(Block &block) {
+		return {
+			.ptr = block.ptr - alignment,
+			.size = block.size + dAlignment
+		};
+	}
+
+	Block getBlockWithoutFence(Block &block) {
+		return {
+			.ptr = block.ptr + alignment,
+			.size = block.size - dAlignment
+		};
+	}
 
 	Block allocate(size_t size) {
 		Block block = a.allocate(size + dAlignment); 
@@ -467,10 +513,10 @@ public:
 
 		memset(block.ptr, startFenceByte, alignment);
 		memset(block.ptr + alignment + size, endFenceByte, alignment);
-		return {
-			.ptr = block.ptr + alignment,
-			.size = size
-		};
+		Block blockWithoutFence = getBlockWithoutFence(block);
+		allocList->push_back(blockWithoutFence);
+
+		return std::move(blockWithoutFence);
 	}
 
 	Block allocateAll() {
@@ -484,50 +530,98 @@ public:
 			.ptr = block.ptr + alignment,
 			.size = block.size - dAlignment
 		};
+		allocList->push_back(allocateAllBlock);
+
 		return allocateAllBlock;
 	}
 
+	bool isBlockAllocated(Block &block) {
+		return std::find(allocList->begin(), allocList->end(), block) != allocList->end();
+	}
+
+	bool isBlockAllocatedAndRemove(Block &block) {
+		auto found = std::find(allocList->begin(), allocList->end(), block);
+		if (found == allocList->end()) {
+			return false;
+		} else {
+			allocList->erase(found);
+			return true;
+		}
+	}
+
+#define CHECK_IS_ALLOCATED(block) \
+		if (!isBlockAllocated((block))) { \
+			throw std::runtime_error("Block was never allocated before being used. This could indicates a use after free (or before allocate) bug"); \
+		}
+
+#define CHECK_IS_ALLOCATED_AND_REMOVE(block) \
+		if (!isBlockAllocatedAndRemove((block))) { \
+			throw std::runtime_error("Block was never allocated before being used. This could indicates a use after free (or before allocate) bug"); \
+		}
+
 	bool expand(Block &block, size_t delta) { 
-		if (a.expand(block, delta)) {
-			memset(block.ptr + block.size - alignment, endFenceByte, alignment);
+		CHECK_IS_ALLOCATED(block);
+
+		Block blockWithFence = getBlockWithFence(block);
+		if (a.expand(blockWithFence, delta)) {
+			memset(blockWithFence.ptr + blockWithFence.size - alignment, endFenceByte, alignment);
+
+			allocList->erase(std::find(allocList->begin(), allocList->end(), block));
+			block = getBlockWithoutFence(blockWithFence);
+			allocList->push_back(block);
 			return true;
 		}
 		return false;
 	}
 
 	void reallocate(Block &block, size_t newSize) { 
-		a.reallocate(block, newSize);
-		memset(block.ptr, startFenceByte, alignment);
-		memset(block.ptr + block.size - alignment, endFenceByte, alignment);
+		CHECK_IS_ALLOCATED(block);
+
+		Block blockWithFence = getBlockWithFence(block);
+		a.reallocate(blockWithFence, newSize + dAlignment);
+		memset(blockWithFence.ptr, startFenceByte, alignment);
+		memset(blockWithFence.ptr + alignment + newSize, endFenceByte, alignment);
+
+		allocList->erase(std::find(allocList->begin(), allocList->end(), block));
+		block = getBlockWithoutFence(blockWithFence);
+		allocList->push_back(block);
 	}
 
 	bool owns(Block block) { 
+		CHECK_IS_ALLOCATED(block);
 		return a.owns(block); 
 	}
 
 	bool isElectricFenceUnmodified(const Block &block) {
-		return equalTo(block.ptr, alignment, startFenceByte) == 0
-			&& equalTo(block.ptr + block.size - alignment, alignment, endFenceByte) == 0;
+		return equalTo(block.ptr, alignment, startFenceByte) && equalTo(block.ptr + block.size - alignment, alignment, endFenceByte);
 	}
 
 	void deallocate(Block block) {
 		DEALLOCATE_NULL_CHECK(block);
-		if (!isElectricFenceUnmodified(block)) {
-			LOG_ERROR(std::format("Electric fence detected a buffer overflow at block {}, {}.", (void*)block.ptr, block.size));
+		CHECK_IS_ALLOCATED_AND_REMOVE(block);
+
+		Block blockWithFence = getBlockWithFence(block); 
+
+		if (!isElectricFenceUnmodified(blockWithFence)) {
+			throw std::runtime_error(std::format("Electric fence detected a buffer overflow at block {}, {}.", (void*)block.ptr, block.size));
 		}
 
-		a.deallocate(block);
+		a.deallocate(blockWithFence);
 	}
 
 	void deallocateAll() { 
+		CHECK_IS_ALLOCATED_AND_REMOVE(allocateAllBlock);
 		if (!isElectricFenceUnmodified(allocateAllBlock)) {
-			LOG_ERROR(std::format("Electric fence detected a buffer overflow at block {}, {}.", (void*)allocateAllBlock.ptr, allocateAllBlock.size));
+			throw std::runtime_error(std::format("Electric fence detected a buffer overflow at block {}, {}.", (void*)allocateAllBlock.ptr, allocateAllBlock.size));
 		}
 
 		a.deallocateAll();
 	}
 
 #else
+	template<typename... Args>
+	ElectricFence(Args&&... args) : Storage<A>(std::forward<Args>(args)...) { }
+
 	FALLTHROUGH()
 #endif
 };
@@ -554,6 +648,7 @@ public:
 	size_t callsToDeallocate = 0;
 	size_t callsToDeallocateAll = 0;
 
+	static constexpr bool HAS_INFINITE_FALLBACK = A::HAS_INFINITE_FALLBACK;
 	static constexpr u8 alignment = A::alignment;
 
 	static constexpr size_t goodSize(size_t size) { return A::goodSize(size); }

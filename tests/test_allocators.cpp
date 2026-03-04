@@ -565,7 +565,7 @@ TEST(Contiguous, MoveConstructorTransfersOwnership) {
 // ======================================================================
 
 TEST(ElectricFence, AllocateDeallocateRoundtrip) {
-	Allocator::ElectricFence<Allocator::Contiguous<4096>, Allocator::NoStorage> ef;
+	Allocator::ElectricFence<Allocator::Malloc, Allocator::NoStorage> ef;
 
 	auto block = ef.allocate(32);
 	ASSERT_NE(block.ptr, nullptr);
@@ -575,16 +575,16 @@ TEST(ElectricFence, AllocateDeallocateRoundtrip) {
 }
 
 TEST(ElectricFence, GoodSizeIncludesFenceOverhead) {
-	constexpr size_t al = Allocator::Contiguous<4096>::alignment;
+	constexpr size_t al = Allocator::Malloc::alignment;
 	// ElectricFence adds 2 * alignment bytes of fencing.
-	using EF = Allocator::ElectricFence<Allocator::Contiguous<4096>, Allocator::NoStorage>;
+	using EF = Allocator::ElectricFence<Allocator::Malloc, Allocator::NoStorage>;
 	size_t efGoodSize = EF::goodSize(1);
-	size_t expected = Allocator::Contiguous<4096>::goodSize(1) + 2 * al;
+	size_t expected = Allocator::Malloc::goodSize(1) + 2 * al;
 	EXPECT_EQ(efGoodSize, expected);
 }
 
 TEST(ElectricFence, FenceBytesAreWrittenAroundBlock) {
-	Allocator::ElectricFence<Allocator::Contiguous<4096>, Allocator::NoStorage> ef;
+	Allocator::ElectricFence<Allocator::Malloc, Allocator::NoStorage> ef;
 	constexpr size_t al = decltype(ef)::alignment;
 
 	auto block = ef.allocate(32);
@@ -598,7 +598,7 @@ TEST(ElectricFence, FenceBytesAreWrittenAroundBlock) {
 }
 
 TEST(ElectricFence, WritingWithinBoundsDoesNotCorruptFence) {
-	Allocator::ElectricFence<Allocator::Contiguous<4096>, Allocator::NoStorage> ef;
+	Allocator::ElectricFence<Allocator::Malloc, Allocator::NoStorage> ef;
 	constexpr size_t al = decltype(ef)::alignment;
 
 	auto block = ef.allocate(32);
@@ -613,7 +613,7 @@ TEST(ElectricFence, WritingWithinBoundsDoesNotCorruptFence) {
 }
 
 TEST(ElectricFence, ConsecutiveAllocationsDoNotOverlap) {
-	Allocator::ElectricFence<Allocator::Contiguous<4096>, Allocator::NoStorage> ef;
+	Allocator::ElectricFence<Allocator::Malloc, Allocator::NoStorage> ef;
 
 	auto b1 = ef.allocate(32);
 	auto b2 = ef.allocate(32);
@@ -622,6 +622,32 @@ TEST(ElectricFence, ConsecutiveAllocationsDoNotOverlap) {
 
 	// User regions should not overlap (accounting for fence overhead).
 	EXPECT_GE(b2.ptr, b1.ptr + b1.size);
+}
+
+TEST(ElectricFence, PreventsUseAfterFree) {
+	Allocator::ElectricFence<Allocator::Malloc, Allocator::NoStorage> ef;
+
+	auto b = ef.allocate(32);
+	ASSERT_NE(b.ptr, nullptr);
+
+	testing::internal::CaptureStdout();
+	ef.deallocate(b);
+	ef.expand(b, 64);
+	std::string output = testing::internal::GetCapturedStdout();
+	ASSERT_TRUE(output.find("use after free") != std::string::npos);
+}
+
+TEST(ElectricFence, PreventsDoubleFree) {
+	Allocator::ElectricFence<Allocator::Malloc, Allocator::NoStorage> ef;
+
+	auto b = ef.allocate(32);
+	ASSERT_NE(b.ptr, nullptr);
+
+	testing::internal::CaptureStdout();
+	ef.deallocate(b);
+	ef.deallocate(b);
+	std::string output = testing::internal::GetCapturedStdout();
+	ASSERT_TRUE(output.find("use after free") != std::string::npos);
 }
 
 // ======================================================================
@@ -755,6 +781,13 @@ TEST(Typed, OwnsAllocatedBlock) {
 	auto block = alloc.allocate(4);
 	ASSERT_NE(block.ptr, nullptr);
 	EXPECT_TRUE(alloc.owns(block));
+}
+
+TEST(Typed, FailsOOM) {
+	Allocator::Typed<u32, Allocator::Contiguous<4096>, Allocator::NoStorage> alloc;
+
+	auto block = alloc.allocate(6000);
+	ASSERT_EQ(block.ptr, nullptr);
 }
 
 TEST(Typed, ReallocateGrowsBlock) {
