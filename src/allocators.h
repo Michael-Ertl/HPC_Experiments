@@ -84,10 +84,13 @@ public:
 	}
 
 	Malloc() {}
+
 	Malloc(const Malloc &) = delete;
+
 	Malloc(Malloc &&) = default;
 
 	Block allocate(size_t size);
+	bool expand(Block &block, size_t delta);
 	void reallocate(Block &block, size_t newSize);
 	bool owns(Block block);
 	void deallocate(Block block);
@@ -341,7 +344,7 @@ public:
 	static_assert(gMaxAllocSize == MaxAllocSize);
 
 	template<typename... Args>
-	Freelist(Args... args) : Storage<A>(std::forward(args)...) { }
+	Freelist(Args&&... args) : Storage<A>(std::forward<Args>(args)...) { }
 	Freelist(const Freelist &) = delete;
 
 	bool isBlockOwnedByFreelist(const size_t size) {
@@ -612,8 +615,7 @@ class Typed : public Storage<A> {
 
 public:
 	template<typename... Args>
-	Typed(Args... args) : Storage<A>(std::forward<Args>(args)...) {}
-	Typed(const Typed &) = delete;
+	Typed(Args&&... args) : Storage<A>(std::forward<Args>(args)...) {}
 
 	static constexpr u8 alignment = A::alignment;
 

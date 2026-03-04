@@ -55,6 +55,11 @@ void Allocator::Malloc::deallocate(Allocator::Block block) {
 	free(block.ptr);
 }
 
+bool Allocator::Malloc::expand(Block &block, size_t delta) {
+	return false;
+}
+
+
 // ElectricFence.
 
 // Instrument.
