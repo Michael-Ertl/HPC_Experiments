@@ -20,7 +20,7 @@
 using namespace Allocator;
 using StdAllocator = ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>;
 
-using TmpAllocator = Allocator::Malloc;
+using TmpAllocator = Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>; // ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>;
 
 struct Route {
     DynamicArray<StdAllocator, u16> customers;
@@ -176,7 +176,7 @@ void chooseTwoNonEmptyRoutes(std::mt19937 &rng, Solution &s, int &aIdx, int &bId
 }
 
 // --- SHIFT operator: move a non-empty segment from one route to another ---
-static void shiftMove(std::mt19937& rng, Solution& s)
+static void shiftMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 {
     if (s.routes.size() < 2) return;
 
@@ -201,7 +201,6 @@ static void shiftMove(std::mt19937& rng, Solution& s)
     std::uniform_int_distribution<size_t> lenDist(1, nFrom - start);
     size_t len = lenDist(rng);
 
-    TmpAllocator tmpAlloc;
     DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
     for (size_t i = 0; i < len; ++i) {
         segment.pushBack(from.customers[start + i]);
@@ -220,7 +219,7 @@ static void shiftMove(std::mt19937& rng, Solution& s)
 }
 
 // --- EXCHANGE operator: swap two non-empty segments between two routes ---
-static void exchangeMove(std::mt19937& rng, Solution& s)
+static void exchangeMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 {
     if (s.routes.size() < 2) return;
 
@@ -249,14 +248,12 @@ static void exchangeMove(std::mt19937& rng, Solution& s)
     std::uniform_int_distribution<size_t> bLenDist(1, nB - bStart);
     size_t bLen = bLenDist(rng);
 
-    TmpAllocator tmpAllocA;
-    DynamicArray<TmpAllocator, u16> segA(tmpAllocA, aLen);
+    DynamicArray<TmpAllocator, u16> segA(tmpAlloc, aLen);
     for (size_t i = 0; i < aLen; ++i) {
         segA.pushBack(A.customers[aStart + i]);
     }
 
-    TmpAllocator tmpAllocB;
-    DynamicArray<TmpAllocator, u16> segB(tmpAllocB, bLen);
+    DynamicArray<TmpAllocator, u16> segB(tmpAlloc, bLen);
     for (size_t i = 0; i < bLen; ++i) {
         segB.pushBack(B.customers[bStart + i]);
     }
@@ -280,17 +277,16 @@ static void exchangeMove(std::mt19937& rng, Solution& s)
 }
 
 // --- REORDER (rearrange) operator: reposition a non-empty segment within one route ---
-static void reorderMove(std::mt19937& rng, Solution& s)
+static void reorderMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 {
 	if (s.routes.empty()) return;
 
 	// pick a route with at least 2 customers (so something meaningful can happen)
-    TmpAllocator tmpAlloc;
-    DynamicArray<TmpAllocator, int> candidates(tmpAlloc, s.routes.size());
-    for (int i = 0; i < (int)s.routes.size(); ++i) {
-        if ((int)s.routes[i].customers.size() >= 2) {
-            candidates.pushBack(i);
-        }
+	DynamicArray<TmpAllocator, int> candidates(tmpAlloc, s.routes.size());
+	for (int i = 0; i < (int)s.routes.size(); ++i) {
+		if ((int)s.routes[i].customers.size() >= 2) {
+			candidates.pushBack(i);
+		}
 	}
 
 	if (candidates.empty()) return;
@@ -309,8 +305,7 @@ static void reorderMove(std::mt19937& rng, Solution& s)
     std::uniform_int_distribution<size_t> lenDist(1, n - start);
     size_t len = lenDist(rng);
 
-    TmpAllocator tmpAlloc2;
-    DynamicArray<TmpAllocator, u16> segment(tmpAlloc2, len);
+    DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
     for (size_t i = 0; i < len; ++i) {
         segment.pushBack(r->customers[start + i]);
     }
@@ -385,6 +380,11 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 	Fallback<A1, A2> fallback = Fallback(a1, a2);
 	StdAllocator alloc = ElectricFence<decltype(fallback)>(fallback);
 
+	// A1 a1_;
+	// A2 a2_;
+	// Fallback<A1, A2> fallback_ = Fallback(a1_, a2_);
+	TmpAllocator tmpAlloc; // = // ElectricFence<decltype(fallback)>(fallback_);
+
 	size_t num_customers = instance.customers.size();
 	int32_t *dist_mat = new int32_t[num_customers * num_customers];
 	init_dist_mat(instance, dist_mat, num_customers);
@@ -411,18 +411,19 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 			// Choose the correct mutation operator
 			switch(std::uniform_int_distribution op(0,4); op(rng)) {
 				case 0:
-					reorderMove(rng, neighbor);
+					reorderMove(rng, neighbor, tmpAlloc);
 					break;
 				case 1:
-					exchangeMove(rng,neighbor);
+					exchangeMove(rng, neighbor, tmpAlloc);
 					break;
 				case 2:
-					shiftMove(rng,neighbor);
+					shiftMove(rng, neighbor, tmpAlloc);
 					break;
-				default: exchangeMove(rng, neighbor);
+				default: exchangeMove(rng, neighbor, tmpAlloc);
 			}
 			mutations++;
 		}
+		tmpAlloc.deallocateAll(); // reset temporary allocator manually.
 
 
 		// Evaluate the neighbor
