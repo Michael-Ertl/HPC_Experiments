@@ -16,8 +16,11 @@ int main() {
     std::vector<ProblemInstance> instances =
         readAllInstances("./benchmark_instances");
 
+    size_t i = 0;
     for (const auto& instance : instances) {
-        stochasticLocalSearch(instance, 30.0, true);
+        stochasticLocalSearch(instance, 0.5, true);
+	i++;
+	if (i > 8) break;
     }
     //ProblemInstance instance = readInstance("./benchmark_instances/c101.txt");
     //stochasticLocalSearch(instance, 10000, true);

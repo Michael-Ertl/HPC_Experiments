@@ -8,6 +8,9 @@ prepare-debug:
 prepare-release:
 	cmake -B build -DCMAKE_BUILD_TYPE=Release
 
+prepare-release-with-tracy:
+	cmake -B build -DENABLE_TRACY=On -DCMAKE_BUILD_TYPE=Release
+
 build:
 	cmake --build build -j 32 # num threads
 

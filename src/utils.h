@@ -8,7 +8,15 @@
 #include <variant>
 
 #include "spdlog/spdlog.h"
-#include <tracy/Tracy.hpp>
+
+#ifdef TRACY_ENABLE
+#include "tracy/Tracy.hpp"
+#define INSTRUMENT_SCOPE(name) ZoneScopedN(name)
+#define TRACY_PLOT(name, value) TracyPlot(name, (int64_t)(value))
+#else
+#define INSTRUMENT_SCOPE(name)
+#define TRACY_PLOT(name, value)
+#endif
 
 using u8 = uint8_t;
 using u16 = uint16_t;

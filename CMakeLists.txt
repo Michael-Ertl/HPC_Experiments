@@ -56,8 +56,9 @@ target_link_libraries(solver_lib PUBLIC spdlog::spdlog)
 target_compile_definitions(solver_lib PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
 
 if (ENABLE_TRACY)
-    target_link_libraries(solver_lib PUBLIC Tracy::TracyClient)
-    target_compile_definitions(solver_lib PUBLIC TRACY_ENABLE=1)
+	target_include_directories(solver_lib PUBLIC submodules/tracy/public)
+	target_link_libraries(solver_lib PUBLIC Tracy::TracyClient)
+	target_compile_definitions(solver_lib PUBLIC TRACY_ENABLE=1)
 endif()
 
 if (CUDAToolkit_FOUND)
