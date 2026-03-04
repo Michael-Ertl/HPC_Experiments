@@ -722,12 +722,12 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 			bestScore);
 	}
 	int mutations = 0;
-	int mutStrenght = 1;
+	int mutStrength = 1;
 	double initialScore = bestScore;
 	for(int it=0;it<iterations;++it) {
 		Solution neighbor = best;
 
-		for (int i = 0; i < mutStrenght;++i)
+		for (int i = 0; i < mutStrength;++i)
 		{
 			// Choose the correct mutation operator
 			switch(std::uniform_int_distribution op(0,4); op(rng)) {
@@ -756,9 +756,9 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 		if (score <= bestScore){
 			best=std::move(neighbor);
 			bestScore = score;
-			mutStrenght = std::min(iterations, mutStrenght * 2);
+			mutStrength = std::min(iterations, mutStrength * 2);
 		} else {
-			mutStrenght = std::max(1, mutStrenght / 2);
+			mutStrength = std::max(1, mutStrength / 2);
 		}
 	}
 
