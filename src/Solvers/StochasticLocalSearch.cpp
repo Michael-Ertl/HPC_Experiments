@@ -6,7 +6,6 @@
 #include "../allocators.h"
 #include "../array.h"
 #include "../utils.h"
-
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -510,6 +509,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		}
 	}
 
+
 	if(verbose)
 	{
 		spdlog::info(
@@ -526,7 +526,6 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	}
 
 	printSolution(instance, dist_mat, best, verbose);
-
 	return bestScore;
 }
 

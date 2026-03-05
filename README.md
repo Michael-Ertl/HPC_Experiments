@@ -35,4 +35,5 @@ We use [tracy]().
 cmake -B profiler/build -S profiler -DCMAKE_BUILD_TYPE=Release
 cmake --build profiler/build --parallel
 ```
-
+## Comfortable Git Things
+- Usse ```git submodule update --init --recursive``` to get submodules that might be missing on your branch.
