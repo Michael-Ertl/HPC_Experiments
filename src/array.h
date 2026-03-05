@@ -202,6 +202,21 @@ public:
 				::new (static_cast<void *>(block.ptr + dest)) T(std::move(block.ptr[src]));
 			}
 		}
+
+		// TODO: Incomplete.
+		if constexpr (std::is_same_v<typeof(*this), typeof(other)>) {
+			if (this == &other) {
+				if (insertPos >= endExclusive) {
+					// Nothing to do here.
+				} else if (insertPos < startInclusive) {
+					startInclusive += count;
+					endExclusive += count;
+				} else {
+					LOG_ERROR("insertRangeAt: Overlapping sections are not supported.");
+					return;
+				}
+			}
+		}
 		
 		// Copy from other
 		for (size_t i = 0; i < count; ++i) {
@@ -210,6 +225,17 @@ public:
 				block.ptr[dest] = other.begin()[startInclusive + i];
 			} else {
 				::new (static_cast<void *>(block.ptr + dest)) T(other.begin()[startInclusive + i]);
+			}
+		}
+
+		// TODO: Incomplete.
+		if constexpr (std::is_same_v<typeof(*this), typeof(other)>) {
+			if (this == &other) {
+				if (insertPos >= endExclusive) {
+					eraseRange(startInclusive + count, endExclusive + count);
+				} else if (insertPos < startInclusive) {
+					eraseRange(startInclusive, endExclusive);
+				}
 			}
 		}
 		

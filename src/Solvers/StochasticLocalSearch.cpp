@@ -5,8 +5,10 @@
 #include "./StochasticLocalSearch.h"
 #include "../allocators.h"
 #include "../array.h"
+#include "../utils.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -38,41 +40,41 @@ static double evaluateRouteCost(
         const ProblemInstance& instance,
 	int32_t *dist_mat,
         const Route& route){
+	INSTRUMENT_SCOPE("evaluateRouteCost");
 
-    int depotIdx=0;
-    int load=0;
-    double time=0;
-    double distanceSum=0;
-    int previousVisitIdx=depotIdx;
+	int depotIdx = 0;
+	int load = 0;
+	double time = 0;
+	double distanceSum = 0;
+	int previousVisitIdx = depotIdx;
 
-    for(int customerIdx : route.customers) {
+	for(int customerIdx : route.customers) {
 
-        const Customer& customer = instance.customers[customerIdx];
+		const Customer& customer = instance.customers[customerIdx];
 
-        load+=customer.demand;
+		load += customer.demand;
 
-        if(load > instance.capacityPerVehicle)
-            return -1; // this instance is infeasible, since a single vehicle cannot serve a customer
+		if(load > instance.capacityPerVehicle)
+		    return -1; // this instance is infeasible, since a single vehicle cannot serve a customer
 
-        double travelDistance = dist_mat[previousVisitIdx * instance.customers.size() + customerIdx];
+		double travelDistance = dist_mat[previousVisitIdx * instance.customers.size() + customerIdx];
 
-        double arrival=time+travelDistance; // time == eunclidean distance in solomon benchmarks
+		double arrival=time+travelDistance; // time == eunclidean distance in solomon benchmarks
 
-        if(arrival>customer.latestLeaveTime)
-            return -1; // We don't reach this customer fast enough -> instance is infeasible
+		if(arrival>customer.latestLeaveTime)
+			return -1; // We don't reach this customer fast enough -> instance is infeasible
 
-        double waitingTime = 0;
-        if (customer.earliestArrivalTime>arrival) {
-            waitingTime += customer.earliestArrivalTime - arrival; // we might have to wait until the custome rcan be served
-        }
+		double waitingTime = 0;
+		if (customer.earliestArrivalTime>arrival) {
+			waitingTime += customer.earliestArrivalTime - arrival; // we might have to wait until the custome rcan be served
+		}
 
-        distanceSum+=travelDistance +  waitingTime;
-        previousVisitIdx=customerIdx;
-    }
+		distanceSum += travelDistance + waitingTime;
+		previousVisitIdx = customerIdx;
+	}
 
-    distanceSum+=dist_mat[previousVisitIdx * instance.customers.size() + depotIdx]; // return to depot
-
-    return distanceSum;
+	distanceSum += dist_mat[previousVisitIdx * instance.customers.size() + depotIdx]; // return to depot
+	return distanceSum;
 }
 
 // returns -1 on infeasible route
@@ -81,24 +83,35 @@ static double evaluateSolution(
         const ProblemInstance& ins,
 	int32_t *dist_mat,
         const Solution &s){
+    INSTRUMENT_SCOPE("evaluateSolution");
 
     int64_t total=0;
+    int routesEvaluated = 0;
+    int routesCached = 0;
 
     for(Route &route : s.routes) {
-	double routeCost = 0;
-	if (route.changed) {
-		routeCost = evaluateRouteCost(ins, dist_mat, route);
-		if(routeCost == -1){ // route infeasible
-		    return -1;
-		}
+        double routeCost = 0;
+        if (route.changed) {
+            routesEvaluated++;
+            {
+                INSTRUMENT_SCOPE("evaluateRouteCost_call");
+                routeCost = evaluateRouteCost(ins, dist_mat, route);
+            }
+            if(routeCost == -1){ // route infeasible
+                return -1;
+            }
 
-		route.changed = false;
-		route.lastCost = routeCost;
-	} else {
-		routeCost = route.lastCost;
-	}
-        total+=routeCost;
+            route.changed = false;
+            route.lastCost = routeCost;
+        } else {
+            routesCached++;
+            routeCost = route.lastCost;
+        }
+        total += routeCost;
     }
+
+    TRACY_PLOT("routes_evaluated", routesEvaluated);
+    TRACY_PLOT("routes_cached", routesCached);
     return total;
 }
 
@@ -107,6 +120,7 @@ static double evaluateSolution(
 // --- Greedy init: use as few vehicles as possible (cost quality is irrelevant) ---
 static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance& ins, int32_t *dist_mat)
 {
+    INSTRUMENT_SCOPE("greedyMinVehiclesInit");
     Solution s = Solution{
 	    .routes = DynamicArray<StdAllocator, Route>(alloc, 8)
     };
@@ -178,100 +192,105 @@ void chooseTwoNonEmptyRoutes(std::mt19937 &rng, Solution &s, int &aIdx, int &bId
 // --- SHIFT operator: move a non-empty segment from one route to another ---
 static void shiftMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 {
+    INSTRUMENT_SCOPE("shiftMove");
     if (s.routes.size() < 2) return;
 
-    // collect indices of non-empty routes
-    int fromIdx = -1, toIdx;
-    chooseTwoNonEmptyRoutes(rng, s, fromIdx, toIdx);
-    if (fromIdx == -1) return;
-    if (fromIdx == toIdx) return;
+    {
+        INSTRUMENT_SCOPE("route_selection");
+        int fromIdx = -1, toIdx;
+        chooseTwoNonEmptyRoutes(rng, s, fromIdx, toIdx);
+        if (fromIdx == -1) return;
+        if (fromIdx == toIdx) return;
 
-    Route& from = s.routes[fromIdx];
-    Route& to   = s.routes[toIdx];
+        Route& from = s.routes[fromIdx];
+        Route& to   = s.routes[toIdx];
 
-    const size_t nFrom = from.customers.size();
-    if (nFrom == 0) return;
+        const size_t nFrom = from.customers.size();
+        if (nFrom == 0) return;
 
-    from.changed = true;
-    to.changed = true;
+        from.changed = true;
+        to.changed = true;
 
-    std::uniform_int_distribution<size_t> startDist(0, nFrom - 1);
-    size_t start = startDist(rng);
+        std::uniform_int_distribution<size_t> startDist(0, nFrom - 1);
+        size_t start = startDist(rng);
 
-    std::uniform_int_distribution<size_t> lenDist(1, nFrom - start);
-    size_t len = lenDist(rng);
+        std::uniform_int_distribution<size_t> lenDist(1, nFrom - start);
+        size_t len = lenDist(rng);
 
-    DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
-    for (size_t i = 0; i < len; ++i) {
-        segment.pushBack(from.customers[start + i]);
-    }
+        {
+            INSTRUMENT_SCOPE("segment_extraction");
+            DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
+            for (size_t i = 0; i < len; ++i) {
+                segment.pushBack(from.customers[start + i]);
+            }
+            from.customers.eraseRange(start, start + len);
 
-    from.customers.eraseRange(start, start + len);
+            std::uniform_int_distribution<size_t> insertDist(0, to.customers.size());
+            size_t insertPos = insertDist(rng);
+            to.customers.insertRangeAt(insertPos, segment, 0, segment.size());
+        }
 
-    std::uniform_int_distribution<size_t> insertDist(0, to.customers.size());
-    size_t insertPos = insertDist(rng);
-    to.customers.insertRangeAt(insertPos, segment, 0, segment.size());
-
-    // remove empty routes to keep vehicle count minimal
-    if (from.customers.empty()) {
-        s.routes.eraseRange(fromIdx, fromIdx + 1);
+        {
+            INSTRUMENT_SCOPE("cleanup");
+            if (from.customers.empty()) {
+                s.routes.eraseRange(fromIdx, fromIdx + 1);
+            }
+        }
     }
 }
 
 // --- EXCHANGE operator: swap two non-empty segments between two routes ---
 static void exchangeMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 {
+    INSTRUMENT_SCOPE("exchangeMove");
     if (s.routes.size() < 2) return;
 
-    int aIdx = -1, bIdx;
-    chooseTwoNonEmptyRoutes(rng, s, aIdx, bIdx);
-    if (aIdx == -1) return;
-    if (aIdx == bIdx) return;
+    {
+        INSTRUMENT_SCOPE("route_selection");
+        int aIdx = -1, bIdx;
+        chooseTwoNonEmptyRoutes(rng, s, aIdx, bIdx);
+        if (aIdx == -1) return;
+        if (aIdx == bIdx) return;
 
-    Route& A = s.routes[aIdx];
-    Route& B = s.routes[bIdx];
+        Route& A = s.routes[aIdx];
+        Route& B = s.routes[bIdx];
 
-    A.changed = true;
-    B.changed = true;
+        A.changed = true;
+        B.changed = true;
 
-    const size_t nA = A.customers.size();
-    const size_t nB = B.customers.size();
-    if (nA == 0 || nB == 0) return;
+        const size_t nA = A.customers.size();
+        const size_t nB = B.customers.size();
+        if (nA == 0 || nB == 0) return;
 
-    std::uniform_int_distribution<size_t> aStartDist(0, nA - 1);
-    size_t aStart = aStartDist(rng);
-    std::uniform_int_distribution<size_t> aLenDist(1, nA - aStart);
-    size_t aLen = aLenDist(rng);
+        std::uniform_int_distribution<size_t> aStartDist(0, nA - 1);
+        size_t aStart = aStartDist(rng);
+        std::uniform_int_distribution<size_t> aLenDist(1, nA - aStart);
+        size_t aLen = aLenDist(rng);
 
-    std::uniform_int_distribution<size_t> bStartDist(0, nB - 1);
-    size_t bStart = bStartDist(rng);
-    std::uniform_int_distribution<size_t> bLenDist(1, nB - bStart);
-    size_t bLen = bLenDist(rng);
+        std::uniform_int_distribution<size_t> bStartDist(0, nB - 1);
+        size_t bStart = bStartDist(rng);
+        std::uniform_int_distribution<size_t> bLenDist(1, nB - bStart);
+        size_t bLen = bLenDist(rng);
 
-    DynamicArray<TmpAllocator, u16> segA(tmpAlloc, aLen);
-    for (size_t i = 0; i < aLen; ++i) {
-        segA.pushBack(A.customers[aStart + i]);
-    }
+        {
+            INSTRUMENT_SCOPE("segment_swap");
+            A.customers.insertRangeAt(aStart, B.customers, bStart, bStart + bLen);
+            B.customers.insertRangeAt(bStart, A.customers, aStart + bLen, aStart + bLen + aLen);
+            A.customers.eraseRange(aStart + bLen, aStart + bLen + aLen);
+            B.customers.eraseRange(bStart + aLen, bStart + aLen + bLen);
+        }
 
-    DynamicArray<TmpAllocator, u16> segB(tmpAlloc, bLen);
-    for (size_t i = 0; i < bLen; ++i) {
-        segB.pushBack(B.customers[bStart + i]);
-    }
-
-    A.customers.eraseRange(aStart, aStart + aLen);
-    B.customers.eraseRange(bStart, bStart + bLen);
-
-    // insert swapped segments at the original start positions
-    A.customers.insertRangeAt(aStart, segB, 0, segB.size());
-    B.customers.insertRangeAt(bStart, segA, 0, segA.size());
-
-    if (A.customers.empty() || B.customers.empty()) {
-        if (aIdx > bIdx) {
-            if (A.customers.empty()) s.routes.eraseRange(aIdx, aIdx + 1);
-            if (B.customers.empty()) s.routes.eraseRange(bIdx, bIdx + 1);
-        } else {
-            if (B.customers.empty()) s.routes.eraseRange(bIdx, bIdx + 1);
-            if (A.customers.empty()) s.routes.eraseRange(aIdx, aIdx + 1);
+        {
+            INSTRUMENT_SCOPE("cleanup");
+            if (A.customers.empty() || B.customers.empty()) {
+                if (aIdx > bIdx) {
+                    if (A.customers.empty()) s.routes.eraseRange(aIdx, aIdx + 1);
+                    if (B.customers.empty()) s.routes.eraseRange(bIdx, bIdx + 1);
+                } else {
+                    if (B.customers.empty()) s.routes.eraseRange(bIdx, bIdx + 1);
+                    if (A.customers.empty()) s.routes.eraseRange(aIdx, aIdx + 1);
+                }
+            }
         }
     }
 }
@@ -279,44 +298,47 @@ static void exchangeMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 // --- REORDER (rearrange) operator: reposition a non-empty segment within one route ---
 static void reorderMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 {
+    INSTRUMENT_SCOPE("reorderMove");
 	if (s.routes.empty()) return;
 
-	// pick a route with at least 2 customers (so something meaningful can happen)
-	DynamicArray<TmpAllocator, int> candidates(tmpAlloc, s.routes.size());
-	for (int i = 0; i < (int)s.routes.size(); ++i) {
-		if ((int)s.routes[i].customers.size() >= 2) {
-			candidates.pushBack(i);
+	{
+		INSTRUMENT_SCOPE("candidate_selection");
+		DynamicArray<TmpAllocator, int> candidates(tmpAlloc, s.routes.size());
+		for (int i = 0; i < (int)s.routes.size(); ++i) {
+			if ((int)s.routes[i].customers.size() >= 2) {
+				candidates.pushBack(i);
+			}
+		}
+
+		if (candidates.empty()) return;
+
+		std::uniform_int_distribution<int> rPick(0, (int)candidates.size() - 1);
+		Route *r = &s.routes[candidates[rPick(rng)]];
+
+		r->changed = true;
+
+		const size_t n = r->customers.size();
+		if (n < 2) return;
+
+		std::uniform_int_distribution<size_t> startDist(0, n - 1);
+		size_t start = startDist(rng);
+
+		std::uniform_int_distribution<size_t> lenDist(1, n - start);
+		size_t len = lenDist(rng);
+
+		{
+			INSTRUMENT_SCOPE("segment_reposition");
+			DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
+			for (size_t i = 0; i < len; ++i) {
+				segment.pushBack(r->customers[start + i]);
+			}
+			r->customers.eraseRange(start, start + len);
+
+			std::uniform_int_distribution<size_t> insertDist(0, r->customers.size());
+			size_t newPos = insertDist(rng);
+			r->customers.insertRangeAt(newPos, segment, 0, segment.size());
 		}
 	}
-
-	if (candidates.empty()) return;
-
-	std::uniform_int_distribution<int> rPick(0, (int)candidates.size() - 1);
-	Route *r = &s.routes[candidates[rPick(rng)]];
-
-	r->changed = true;
-
-    const size_t n = r->customers.size();
-    if (n < 2) return;
-
-    std::uniform_int_distribution<size_t> startDist(0, n - 1);
-    size_t start = startDist(rng);
-
-    std::uniform_int_distribution<size_t> lenDist(1, n - start);
-    size_t len = lenDist(rng);
-
-    DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
-    for (size_t i = 0; i < len; ++i) {
-        segment.pushBack(r->customers[start + i]);
-    }
-
-    r->customers.eraseRange(start, start + len);
-
-	// choose new insertion position in the shortened route
-    std::uniform_int_distribution<size_t> insertDist(0, r->customers.size());
-    size_t newPos = insertDist(rng);
-
-    r->customers.insertRangeAt(newPos, segment, 0, segment.size());
 }
 
 
@@ -403,7 +425,8 @@ static void init_dist_mat(const ProblemInstance &ins, int32_t *dist_mat, size_t 
 }
 
 // TODO: add verbose parameter so benchmarks can run without console output
-double stochasticLocalSearch(const ProblemInstance& instance, const int iterations, bool verbose){
+double stochasticLocalSearch(const ProblemInstance& instance, const double timeLimitSeconds, bool verbose){
+    INSTRUMENT_SCOPE("stochasticLocalSearch");
 	std::mt19937 rng(0); // random seed
 	
 	using A1 = Freelist<Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>;
@@ -436,7 +459,19 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 	int mutations = 0;
 	int mutStrength = 1;
 	double initialScore = bestScore;
-	for(int it=0;it<iterations;++it) {
+	
+	auto startTime = std::chrono::high_resolution_clock::now();
+	int iterationCount = 0;
+	
+	while (true) {
+		INSTRUMENT_SCOPE("SLS_iteration");
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> elapsed = currentTime - startTime;
+		if (elapsed.count() >= timeLimitSeconds) {
+			break;
+		}
+		
+		iterationCount++;
 		Solution neighbor = best;
 
 		for (int i = 0; i < mutStrength;++i)
@@ -469,7 +504,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 		if (score <= bestScore){
 			best=std::move(neighbor);
 			bestScore = score;
-			mutStrength = std::min(iterations, mutStrength * 2);
+			mutStrength = std::min(1000, mutStrength * 2);
 		} else {
 			mutStrength = std::max(1, mutStrength / 2);
 		}
@@ -482,7 +517,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const int iteratio
 		initialScore - bestScore);
 
 		spdlog::info (
-		"Iterations {} | Mutations {}", iterations, mutations);
+		"Time {:.3f}s | Iterations {} | Mutations {}", timeLimitSeconds, iterationCount, mutations);
 
 		spdlog::info(
 		"Vehicles {} / {}",

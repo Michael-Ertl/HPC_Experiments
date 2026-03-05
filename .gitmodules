@@ -7,3 +7,9 @@
 [submodule "submodules/benchmark"]
 	path = submodules/benchmark
 	url = https://github.com/google/benchmark
+[submodule "submodules/FlameGraph"]
+	path = submodules/FlameGraph
+	url = https://github.com/brendangregg/FlameGraph
+[submodule "submodules/tracy"]
+	path = submodules/tracy
+	url = https://github.com/wolfpld/tracy
