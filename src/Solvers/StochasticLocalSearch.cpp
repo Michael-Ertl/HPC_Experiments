@@ -20,7 +20,7 @@
 #include <iostream>
 
 using namespace Allocator;
-using StdAllocator = ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>;
+using StdAllocator = Instrument<ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>>;
 
 using TmpAllocator = Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>; // ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>;
 
@@ -401,7 +401,8 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	A1 a1;
 	A2 a2;
 	Fallback<A1, A2> fallback = Fallback(a1, a2);
-	StdAllocator alloc = ElectricFence<decltype(fallback)>(fallback);
+	auto eFence = ElectricFence<decltype(fallback)>(fallback);
+	StdAllocator alloc = Instrument<decltype(eFence)>(eFence);
 
 	// A1 a1_;
 	// A2 a2_;
@@ -423,12 +424,12 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 			instance.name,
 			bestScore);
 	}
-	int mutations = 0;
-	int mutStrength = 1;
+	u64 mutations = 0;
+	u64 mutStrength = 1;
 	double initialScore = bestScore;
 	
 	auto startTime = std::chrono::high_resolution_clock::now();
-	int iterationCount = 0;
+	u64 iterationCount = 0;
 	
 	while (true) {
 		INSTRUMENT_SCOPE("SLS_iteration");
@@ -471,9 +472,9 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		if (score <= bestScore){
 			best=std::move(neighbor);
 			bestScore = score;
-			mutStrength = std::min(1000, mutStrength * 2);
+			mutStrength = std::min(1000lu, mutStrength * 2);
 		} else {
-			mutStrength = std::max(1, mutStrength / 2);
+			mutStrength = std::max(1lu, mutStrength / 2);
 		}
 	}
 
@@ -493,6 +494,8 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	}
 
 	printSolution(instance, dist_mat, best, verbose);
+
+	delete[] dist_mat;
 
 	return bestScore;
 }
