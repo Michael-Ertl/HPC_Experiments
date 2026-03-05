@@ -16,7 +16,7 @@
 #include <type_traits>
 #include <spdlog/spdlog.h>
 #include <iostream>
-
+#include <immintrin.h>
 using namespace Allocator;
 using StdAllocator = ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>;
 
@@ -360,15 +360,48 @@ static int32_t dist(const ProblemInstance& ins,int i,int j){
     return (int32_t)std::lround(std::sqrt(dx*dx+dy*dy));
 }
 
-static void init_dist_mat(const ProblemInstance &ins, int32_t *dist_mat, size_t num_customers) {
-    for (size_t i = 0; i < num_customers; i++) {
-	for (size_t j = 0; j < num_customers; j++) {
-		dist_mat[i * num_customers + j] = dist(ins, i, j);
+static void init_dist_mat(const ProblemInstance &ins, int32_t *dist_mat, size_t n) {
+
+	for (size_t i = 0; i < n; i++) {
+
+		float xi = ins.customers[i].x;
+		float yi = ins.customers[i].y;
+
+		__m256 xi_v = _mm256_set1_ps(xi);
+		__m256 yi_v = _mm256_set1_ps(yi);
+
+		size_t j = 0;
+
+		for (; j + 7 < n; j += 8) {
+
+			float x_arr[8], y_arr[8];
+			for (int k = 0; k < 8; k++) {
+				x_arr[k] = ins.customers[j+k].x;
+				y_arr[k] = ins.customers[j+k].y;
+			}
+
+			__m256 xj = _mm256_loadu_ps(x_arr);
+			__m256 yj = _mm256_loadu_ps(y_arr);
+
+			__m256 dx = _mm256_sub_ps(xi_v, xj);
+			__m256 dy = _mm256_sub_ps(yi_v, yj);
+
+			__m256 d2 = _mm256_add_ps(_mm256_mul_ps(dx,dx), _mm256_mul_ps(dy,dy));
+
+			__m256 d = _mm256_sqrt_ps(d2);
+
+			__m256i di = _mm256_cvtps_epi32(d);
+
+			_mm256_storeu_si256((__m256i*)&dist_mat[i*n + j], di);
+		}
+
+		// remaining elements
+		for (; j < n; j++) {
+			dist_mat[i*n + j] = dist(ins, i, j);
+		}
 	}
-    }
 }
 
-// TODO: Change print stmts to spdlogging statements for cleaner outputs.
 // TODO: add verbose parameter so benchmarks can run without console output
 double stochasticLocalSearch(const ProblemInstance& instance, const int iterations, bool verbose){
 	std::mt19937 rng(0); // random seed
