@@ -98,88 +98,6 @@ struct TabuList {
 };
 
 
-// returns -1 on infeasible instance
-// returns total route distance/cost otherwise
-static double evaluateRouteCost(
-        const ProblemInstance& instance,
-		float *dist_mat,
-        const Route& route){
-	INSTRUMENT_SCOPE("evaluateRouteCost");
-
-	int depotIdx = 0;
-	int load = 0;
-	double time = 0;
-	double distanceSum = 0;
-	int previousVisitIdx = depotIdx;
-
-	for(int customerIdx : route.customers) {
-
-		const Customer& customer = instance.customers[customerIdx];
-
-		load += customer.demand;
-
-		if(load > instance.capacityPerVehicle)
-		    return -1; // this instance is infeasible, since a single vehicle cannot serve a customer
-
-		double travelDistance = dist_mat[previousVisitIdx * instance.customers.size() + customerIdx];
-
-		double arrival=time+travelDistance; // time == eunclidean distance in solomon benchmarks
-
-		if(arrival>customer.latestLeaveTime)
-			return -1; // We don't reach this customer fast enough -> instance is infeasible
-
-		double waitingTime = 0;
-		if (customer.earliestArrivalTime>arrival) {
-			waitingTime += customer.earliestArrivalTime - arrival; // we might have to wait until the custome rcan be served
-		}
-
-		distanceSum += travelDistance + waitingTime;
-		previousVisitIdx = customerIdx;
-	}
-
-	distanceSum += dist_mat[previousVisitIdx * instance.customers.size() + depotIdx]; // return to depot
-	return distanceSum;
-}
-
-// returns -1 on infeasible route
-// returns total fleetCost otherwise
-static double evaluateSolution(
-        const ProblemInstance& ins,
-		float *dist_mat,
-        const Solution &s){
-    INSTRUMENT_SCOPE("evaluateSolution");
-
-    int64_t total=0;
-    int routesEvaluated = 0;
-    int routesCached = 0;
-
-    for(Route &route : s.routes) {
-        double routeCost = 0;
-        if (route.changed) {
-            routesEvaluated++;
-            {
-                INSTRUMENT_SCOPE("evaluateRouteCost_call");
-                routeCost = evaluateRouteCost(ins, dist_mat, route);
-            }
-            if(routeCost == -1){ // route infeasible
-                return -1;
-            }
-
-            route.changed = false;
-            route.lastCost = routeCost;
-        } else {
-            routesCached++;
-            routeCost = route.lastCost;
-        }
-        total += routeCost;
-    }
-
-    TRACY_PLOT("routes_evaluated", routesEvaluated);
-    TRACY_PLOT("routes_cached", routesCached);
-    return total;
-}
-
-
 
 // --- Greedy init: use as few vehicles as possible (cost quality is irrelevant) ---
 static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance& ins, float *dist_mat)
@@ -243,6 +161,87 @@ static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance
     return s;
 }
 
+// returns -1 on infeasible instance
+// returns total route distance/cost otherwise
+static double evaluateRouteCost(
+        const ProblemInstance& instance,
+		float *dist_mat,
+        const Route& route){
+	INSTRUMENT_SCOPE("evaluateRouteCost");
+
+	int depotIdx = 0;
+	int load = 0;
+	double time = 0;
+	double distanceSum = 0;
+	int previousVisitIdx = depotIdx;
+
+	for(int customerIdx : route.customers) {
+
+		const Customer& customer = instance.customers[customerIdx];
+
+		load += customer.demand;
+
+		if(load > instance.capacityPerVehicle)
+		    return -1; // this instance is infeasible, since a single vehicle cannot serve a customer
+
+		double travelDistance = dist_mat[previousVisitIdx * instance.customers.size() + customerIdx];
+
+		double arrival=time+travelDistance; // time == eunclidean distance in solomon benchmarks
+
+		if(arrival>customer.latestLeaveTime)
+			return -1; // We don't reach this customer fast enough -> instance is infeasible
+
+		double waitingTime = 0;
+		if (customer.earliestArrivalTime>arrival) {
+			waitingTime += customer.earliestArrivalTime - arrival; // we might have to wait until the custome rcan be served
+		}
+
+		distanceSum += travelDistance + waitingTime;
+		previousVisitIdx = customerIdx;
+	}
+
+	distanceSum += dist_mat[previousVisitIdx * instance.customers.size() + depotIdx]; // return to depot
+	return distanceSum;
+}
+
+// returns -1 on infeasible route
+// returns total fleetCost otherwise
+static double evaluateSolution(
+        const ProblemInstance& ins,
+		float *dist_mat,
+        const Solution &s) {
+    INSTRUMENT_SCOPE("evaluateSolution");
+
+    int64_t total=0;
+    int routesEvaluated = 0;
+    int routesCached = 0;
+
+    for(Route &route : s.routes) {
+        double routeCost = 0;
+        if (route.changed) {
+            routesEvaluated++;
+            {
+                INSTRUMENT_SCOPE("evaluateRouteCost_call");
+                routeCost = evaluateRouteCost(ins, dist_mat, route);
+            }
+            if(routeCost == -1){ // route infeasible
+                return -1;
+            }
+
+            route.changed = false;
+            route.lastCost = routeCost;
+        } else {
+            routesCached++;
+            routeCost = route.lastCost;
+        }
+        total += routeCost;
+    }
+
+    TRACY_PLOT("routes_evaluated", routesEvaluated);
+    TRACY_PLOT("routes_cached", routesCached);
+    return total;
+}
+
 void chooseTwoNonEmptyRoutes(std::mt19937 &rng, Solution &s, int &aIdx, int &bIdx) { 
 	// NOTE(Erik): No route can every be empty! That invariant must be respected.
 
@@ -301,6 +300,61 @@ static void shiftMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
             }
         }
     }
+}
+
+// --- SHIFT operator: move a non-empty segment from one route to another ---
+static void shiftMove_Exhaustive(
+        const ProblemInstance& instance,
+		float *dist_mat,
+		Solution& s, 
+		TmpAllocator &tmpAlloc) {
+
+    INSTRUMENT_SCOPE("shiftMove_Exhaustive");
+    if (s.routes.size() < 2) return;
+
+	for (size_t fromIdx = 0; fromIdx < s.routes.size(); fromIdx++) {
+		Route& from = s.routes[fromIdx];
+		const size_t nFrom = from.customers.size();
+		if (nFrom == 0) continue;
+
+		for (size_t toIdx = 0; toIdx < s.routes.size(); toIdx++) {
+			Route& to = s.routes[toIdx];
+
+			float fromOldCost = evaluateRouteCost(instance, dist_mat, from);
+			float toOldCost = evaluateRouteCost(instance, dist_mat, to);
+
+			for (size_t start = 0; start < nFrom; start++) {
+				for (size_t len = 1; len <= nFrom - start; len++) {
+
+					DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
+					for (size_t i = 0; i < len; ++i) {
+						segment.pushBack(from.customers[start + i]);
+					}
+					from.customers.eraseRange(start, start + len);
+
+					for (size_t insertPos = 0; insertPos <= to.customers.size(); insertPos++) {
+						to.customers.insertRangeAt(insertPos, segment, 0, segment.size());
+
+						if (from.customers.empty()) {
+							s.routes.eraseRange(fromIdx, fromIdx + 1);
+						}
+
+						// Return to initial state.
+						to.customers.eraseRange(insertPos, insertPos + segment.size());
+
+						float fromNewCost = evaluateRouteCost(instance, dist_mat, from);
+						float toNewCost = evaluateRouteCost(instance, dist_mat, to);
+
+						oldCost += fromNewCost + toNewCost - fromOldCost - toOldCost;
+					}
+
+					// Return to initial state.
+					from.customers.insertRangeAt(start, segment, 0, segment.size());
+				}
+			}
+		}
+	}
+
 }
 
 // --- EXCHANGE operator: swap two non-empty segments between two routes ---
@@ -436,7 +490,6 @@ static void printSolution(
 }
 
 static float dist(const ProblemInstance& ins,int i,int j){
-
     const Customer &a=ins.customers[i];
     const Customer &b=ins.customers[j];
 
