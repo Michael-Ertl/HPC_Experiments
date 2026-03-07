@@ -523,7 +523,23 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 			default: exchangeMove(rng, neighbor, tmpAlloc);
 		}
 
+		// check all shifts / exchanges
+		Solution tmpBest = exchangeMove_Exhaustive(neighbor, tmpAlloc);
+		Solution shiftMoveBest = shiftMove_Exhaustive(neighbor, tmpAlloc);
+		if (evaluateSolution( ... ) {
+			tmpBest = shiftMoveBest;
+		}
+
 		// check all permutations
+		Solution reorderMoveBest = reorder_Exhaustive(tmpBest, tmpAlloc);
+		if (evaluateSolution( ... ) {
+			best = shiftMoveBest;
+		}
+
+		neighbor = reorderMoveBest;	
+
+		/* 
+
 		tmpAlloc.deallocateAll(); // reset temporary allocator manually.
 		if (tabuList.contains(neighbor)) {
 			totalTabuHits++;
@@ -546,6 +562,8 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 			mutStrength = std::max(1lu, mutStrength / 2);
 		}
 		tabuList.push(best);
+
+		*/
 	}
 
 	if(verbose)
