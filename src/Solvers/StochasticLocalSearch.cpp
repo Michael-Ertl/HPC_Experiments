@@ -525,7 +525,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 
 		// check all shifts / exchanges
 		Solution tmpBest = exchangeMove_Exhaustive(neighbor, tmpAlloc);
-		Solution shiftMoveBest = shiftMove_Exhaustive(neighbor, tmpAlloc);
+		Solution shiftMoveBest = shiftMove_Exhagitustive(neighbor, tmpAlloc);
 		if (evaluateSolution( ... ) {
 			tmpBest = shiftMoveBest;
 		}
@@ -537,6 +537,28 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		}
 
 		neighbor = reorderMoveBest;	
+
+		// Evaluate the neighbor
+		double score = evaluateSolution(instance, dist_mat, neighbor);
+		if (score == -1) {
+			// infeasible candidate => continue
+			continue;
+		}
+		if (tabuList.contains(neighbor)) {
+			totalTabuHits++;
+			tabuHits++;
+			continue; // We skip if we already saw this solution
+		}
+		// accept if equal or better to walk plateaus in solution space
+		if (score <= bestScore){
+			best=std::move(neighbor);
+			bestScore = score;
+			mutStrength = std::min(1000lu, mutStrength * 2);
+		} else {
+			mutStrength = std::max(1lu, mutStrength / 2);
+		}
+		tabuList.push(best);
+
 
 		/* 
 
