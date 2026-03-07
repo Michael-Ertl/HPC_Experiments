@@ -635,7 +635,6 @@ class Instrument : public Storage<A> {
 	using Storage<A>::a;
 
 public:
-	Instrument() {}
 	Instrument(const Instrument &) = delete;
 	Instrument(Instrument &&) = default;
 #if ENABLE_PROFILER
@@ -653,6 +652,9 @@ public:
 
 	static constexpr size_t goodSize(size_t size) { return A::goodSize(size); }
 
+	template<typename... Args>
+	Instrument(Args&&... args) : Storage<A>(std::forward<Args>(args)...) {}
+
 	~Instrument() {
 		LOG_INFO(std::format("Allocator at {} had callsToAllocate={}", (void*)this, callsToAllocate));
 		LOG_INFO(std::format("Allocator at {} had callsToAllocateAll={}", (void*)this, callsToAllocateAll));
@@ -661,6 +663,10 @@ public:
 		LOG_INFO(std::format("Allocator at {} had callsToOwns={}", (void*)this, callsToOwns));
 		LOG_INFO(std::format("Allocator at {} had callsToDeallocate={}", (void*)this, callsToDeallocate));
 		LOG_INFO(std::format("Allocator at {} had callsToDeallocateAll={}", (void*)this, callsToDeallocateAll));
+
+		if (callsToDeallocate < callsToAllocate) {
+			LOG_ERROR(std::format("Allocator at {} leaked {} allocations", (void *)this, callsToDeallocate - callsToAllocate));
+		}
 	}
 
 	Block allocate(size_t size) { 
@@ -700,6 +706,9 @@ public:
 	}
 
 #else
+	template<typename... Args>
+	Instrument(Args&&... args) : Storage<A>(std::forward<Args>(args)...) {}
+
 	FALLTHROUGH()
 #endif
 };

@@ -18,9 +18,9 @@ int main() {
 
     size_t i = 0;
     for (const auto& instance : instances) {
-        stochasticLocalSearch(instance, 0.5, true);
+        stochasticLocalSearch(instance, 12, true);
 	i++;
-	if (i > 8) break;
+	if (i > 4) break;
     }
     //ProblemInstance instance = readInstance("./benchmark_instances/c101.txt");
     //stochasticLocalSearch(instance, 10000, true);

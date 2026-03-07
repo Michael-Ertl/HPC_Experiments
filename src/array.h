@@ -126,6 +126,16 @@ public:
 	T &operator[](size_t idx) { return block.ptr[idx]; }
 	const T &operator[](size_t idx) const { return block.ptr[idx]; }
 
+
+	bool contains(const T& element) {
+		for (size_t i = 0; i < used; ++i) {
+			if (block.ptr[i] == element) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void reserve(size_t n) {
 		if (n > capacity()) {
 			grow(n);
@@ -159,6 +169,8 @@ public:
 		destroyElements(0, used);
 		used = 0;
 	}
+
+
 
 	void eraseRange(size_t startInclusive, size_t endExclusive) {
 		if (startInclusive >= endExclusive || startInclusive >= used) {

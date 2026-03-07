@@ -6,6 +6,7 @@
 #include "../allocators.h"
 #include "../array.h"
 #include "../utils.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -17,9 +18,9 @@
 #include <type_traits>
 #include <spdlog/spdlog.h>
 #include <iostream>
-#include <immintrin.h>
+
 using namespace Allocator;
-using StdAllocator = ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>;
+using StdAllocator = Instrument<ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>>;
 
 using TmpAllocator = Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>; // ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>;
 
@@ -27,17 +28,81 @@ struct Route {
     DynamicArray<StdAllocator, u16> customers;
     bool changed;
     double lastCost;
+
 };
+
 
 struct Solution {
     DynamicArray<StdAllocator, Route> routes;
 };
 
+
+#include <algorithm>
+#include <algorithm>
+
+bool operator==(const Route& a, const Route& b)
+{
+	if (a.customers.size() != b.customers.size())
+		return false;
+
+	return std::equal(
+		a.customers.begin(),
+		a.customers.end(),
+		b.customers.begin()
+	);
+}
+
+bool operator==(const Solution& a, const Solution& b)
+{
+	if (a.routes.size() != b.routes.size())
+		return false;
+
+	return std::equal(
+		a.routes.begin(),
+		a.routes.end(),
+		b.routes.begin()
+	);
+}
+
+
+
+size_t hashSolution(const Solution& s)
+{
+	size_t h = 0;
+
+	for (const Route& r : s.routes)
+	{
+		for (auto c : r.customers)
+		{
+			h = h * 31 + c;
+		}
+
+		h = h * 131; // route separator
+	}
+
+	return h;
+}
+
+#include <unordered_set>
+
+struct TabuList {
+	std::unordered_set<size_t> hashes;
+
+	bool contains(const Solution& s) const {
+		return hashes.contains(hashSolution(s));
+	}
+
+	void push(const Solution& s) {
+		hashes.insert(hashSolution(s));
+	}
+};
+
+
 // returns -1 on infeasible instance
 // returns total route distance/cost otherwise
 static double evaluateRouteCost(
         const ProblemInstance& instance,
-	int32_t *dist_mat,
+		float *dist_mat,
         const Route& route){
 	INSTRUMENT_SCOPE("evaluateRouteCost");
 
@@ -80,7 +145,7 @@ static double evaluateRouteCost(
 // returns total fleetCost otherwise
 static double evaluateSolution(
         const ProblemInstance& ins,
-	int32_t *dist_mat,
+		float *dist_mat,
         const Solution &s){
     INSTRUMENT_SCOPE("evaluateSolution");
 
@@ -117,7 +182,7 @@ static double evaluateSolution(
 
 
 // --- Greedy init: use as few vehicles as possible (cost quality is irrelevant) ---
-static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance& ins, int32_t *dist_mat)
+static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance& ins, float *dist_mat)
 {
     INSTRUMENT_SCOPE("greedyMinVehiclesInit");
     Solution s = Solution{
@@ -343,7 +408,7 @@ static void reorderMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 
 static void printSolution(
         const ProblemInstance& ins,
-	int32_t *dist_mat,
+		float *dist_mat,
         Solution& s,
         bool verbose)
 {
@@ -370,7 +435,7 @@ static void printSolution(
     }
 }
 
-static int32_t dist(const ProblemInstance& ins,int i,int j){
+static float dist(const ProblemInstance& ins,int i,int j){
 
     const Customer &a=ins.customers[i];
     const Customer &b=ins.customers[j];
@@ -378,51 +443,18 @@ static int32_t dist(const ProblemInstance& ins,int i,int j){
     double dx=a.x-b.x;
     double dy=a.y-b.y;
 
-    return (int32_t)std::lround(std::sqrt(dx*dx+dy*dy));
+    return (float)std::sqrt(dx*dx+dy*dy);
 }
 
-static void init_dist_mat(const ProblemInstance &ins, int32_t *dist_mat, size_t n) {
-
-	for (size_t i = 0; i < n; i++) {
-
-		float xi = ins.customers[i].x;
-		float yi = ins.customers[i].y;
-
-		__m256 xi_v = _mm256_set1_ps(xi);
-		__m256 yi_v = _mm256_set1_ps(yi);
-
-		size_t j = 0;
-
-		for (; j + 7 < n; j += 8) {
-
-			float x_arr[8], y_arr[8];
-			for (int k = 0; k < 8; k++) {
-				x_arr[k] = ins.customers[j+k].x;
-				y_arr[k] = ins.customers[j+k].y;
-			}
-
-			__m256 xj = _mm256_loadu_ps(x_arr);
-			__m256 yj = _mm256_loadu_ps(y_arr);
-
-			__m256 dx = _mm256_sub_ps(xi_v, xj);
-			__m256 dy = _mm256_sub_ps(yi_v, yj);
-
-			__m256 d2 = _mm256_add_ps(_mm256_mul_ps(dx,dx), _mm256_mul_ps(dy,dy));
-
-			__m256 d = _mm256_sqrt_ps(d2);
-
-			__m256i di = _mm256_cvtps_epi32(d);
-
-			_mm256_storeu_si256((__m256i*)&dist_mat[i*n + j], di);
+static void init_dist_mat(const ProblemInstance &ins, float *dist_mat, size_t num_customers) {
+    for (size_t i = 0; i < num_customers; i++) {
+		for (size_t j = 0; j < num_customers; j++) {
+			dist_mat[i * num_customers + j] = dist(ins, i, j);
 		}
-
-		// remaining elements
-		for (; j < n; j++) {
-			dist_mat[i*n + j] = dist(ins, i, j);
-		}
-	}
+    }
 }
 
+// TODO: Change print stmts to spdlogging statements for cleaner outputs.
 // TODO: add verbose parameter so benchmarks can run without console output
 double stochasticLocalSearch(const ProblemInstance& instance, const double timeLimitSeconds, bool verbose){
     INSTRUMENT_SCOPE("stochasticLocalSearch");
@@ -433,7 +465,8 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	A1 a1;
 	A2 a2;
 	Fallback<A1, A2> fallback = Fallback(a1, a2);
-	StdAllocator alloc = ElectricFence<decltype(fallback)>(fallback);
+	auto eFence = ElectricFence<decltype(fallback)>(fallback);
+	StdAllocator alloc = Instrument<decltype(eFence)>(eFence);
 
 	// A1 a1_;
 	// A2 a2_;
@@ -441,7 +474,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	TmpAllocator tmpAlloc; // = // ElectricFence<decltype(fallback)>(fallback_);
 
 	size_t num_customers = instance.customers.size();
-	int32_t *dist_mat = new int32_t[num_customers * num_customers];
+	float *dist_mat = new float[num_customers * num_customers];
 	init_dist_mat(instance, dist_mat, num_customers);
 
 	Solution best = greedyMinVehiclesInit(alloc, instance, dist_mat);
@@ -455,13 +488,19 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 			instance.name,
 			bestScore);
 	}
-	int mutations = 0;
-	int mutStrength = 1;
+	u64 mutations = 0;
+	u64 mutStrength = 1;
 	double initialScore = bestScore;
 	
 	auto startTime = std::chrono::high_resolution_clock::now();
-	int iterationCount = 0;
-	
+	u64 iterationCount = 0;
+
+
+	TabuList tabuList;
+	tabuList.push(best);
+
+	int totalTabuHits =0;
+	int tabuHits = 0;
 	while (true) {
 		INSTRUMENT_SCOPE("SLS_iteration");
 		auto currentTime = std::chrono::high_resolution_clock::now();
@@ -473,25 +512,24 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		iterationCount++;
 		Solution neighbor = best;
 
-		for (int i = 0; i < mutStrength;++i)
-		{
-			// Choose the correct mutation operator
-			switch(std::uniform_int_distribution op(0,4); op(rng)) {
-				case 0:
-					reorderMove(rng, neighbor, tmpAlloc);
-					break;
-				case 1:
-					exchangeMove(rng, neighbor, tmpAlloc);
-					break;
-				case 2:
-					shiftMove(rng, neighbor, tmpAlloc);
-					break;
-				default: exchangeMove(rng, neighbor, tmpAlloc);
-			}
-			mutations++;
+		// Choose the correct mutation operator
+		switch(std::uniform_int_distribution op(0,1); op(rng)) {
+			case 0:
+				exchangeMove(rng, neighbor, tmpAlloc);
+				break;
+			case 1:
+				shiftMove(rng, neighbor, tmpAlloc);
+				break;
+			default: exchangeMove(rng, neighbor, tmpAlloc);
 		}
-		tmpAlloc.deallocateAll(); // reset temporary allocator manually.
 
+		// check all permutations
+		tmpAlloc.deallocateAll(); // reset temporary allocator manually.
+		if (tabuList.contains(neighbor)) {
+			totalTabuHits++;
+			tabuHits++;
+			continue; // We skip if we already saw this solution
+		}
 
 		// Evaluate the neighbor
 		double score = evaluateSolution(instance, dist_mat, neighbor);
@@ -503,18 +541,21 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		if (score <= bestScore){
 			best=std::move(neighbor);
 			bestScore = score;
-			mutStrength = std::min(1000, mutStrength * 2);
+			mutStrength = std::min(1000lu, mutStrength * 2);
 		} else {
-			mutStrength = std::max(1, mutStrength / 2);
+			mutStrength = std::max(1lu, mutStrength / 2);
 		}
+		tabuList.push(best);
 	}
-
 
 	if(verbose)
 	{
 		spdlog::info(
 		"Best Score {} | Improvement {}",bestScore,
 		initialScore - bestScore);
+
+		spdlog::info(
+			"TotalTabuHits {}",totalTabuHits);
 
 		spdlog::info (
 		"Time {:.3f}s | Iterations {} | Mutations {}", timeLimitSeconds, iterationCount, mutations);
@@ -526,6 +567,9 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	}
 
 	printSolution(instance, dist_mat, best, verbose);
+
+	delete[] dist_mat;
+
 	return bestScore;
 }
 
