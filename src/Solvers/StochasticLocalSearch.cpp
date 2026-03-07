@@ -34,6 +34,7 @@ struct Route {
 
 struct Solution {
     DynamicArray<StdAllocator, Route> routes;
+	double lastCost;
 };
 
 
@@ -96,70 +97,6 @@ struct TabuList {
 		hashes.insert(hashSolution(s));
 	}
 };
-
-
-
-// --- Greedy init: use as few vehicles as possible (cost quality is irrelevant) ---
-static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance& ins, float *dist_mat)
-{
-    INSTRUMENT_SCOPE("greedyMinVehiclesInit");
-    Solution s = Solution{
-	    .routes = DynamicArray<StdAllocator, Route>(alloc, 8)
-    };
-
-    // customers are 1..n (0 is depot)
-    DynamicArray<StdAllocator, u16> customers(alloc, ins.customers.size() - 1);
-    for (u16 i = 1; i < (u16)ins.customers.size(); ++i) {
-        customers.pushBack(i);
-    }
-
-    // Heuristic ordering biased toward fewer vehicles:
-    // pack big demands early; break ties by tighter deadlines.
-    std::sort(customers.begin(), customers.end(),
-        [&](int a, int b){
-            const auto& A = ins.customers[a];
-            const auto& B = ins.customers[b];
-            if (A.demand != B.demand) return A.demand > B.demand;
-            return A.latestLeaveTime < B.latestLeaveTime;
-        });
-
-    // First-fit append: try to put each customer into an existing route (append),
-    // otherwise open a new route. This prioritizes minimizing #routes.
-    for (int c : customers)
-    {
-        bool placed = false;
-
-        for (Route& r : s.routes)
-        {
-            r.customers.pushBack(c);
-            if (evaluateRouteCost(ins, dist_mat, r) != -1)
-            {
-                placed = true;
-                break;
-            }
-            r.customers.popBack();
-        }
-
-        if (!placed)
-        {
-            Route r = {
-		    .customers = DynamicArray<StdAllocator, u16>(alloc, 8),
-		    .changed = true,
-		    .lastCost = 0.0
-	    };
-            r.customers.pushBack(c);
-            s.routes.pushBack(std::move(r));
-        }
-    }
-
-    // remove any accidental empty routes (shouldn't happen, but keep it clean)
-    //s.routes.erase(
-    //    std::remove_if(s.routes.begin(), s.routes.end(),
-    //        [](const Route& r){ return r.customers.empty(); }),
-    //    s.routes.end());
-
-    return s;
-}
 
 // returns -1 on infeasible instance
 // returns total route distance/cost otherwise
@@ -242,6 +179,69 @@ static double evaluateSolution(
     return total;
 }
 
+
+
+// --- Greedy init: use as few vehicles as possible (cost quality is irrelevant) ---
+static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance& ins, float *dist_mat)
+{
+    INSTRUMENT_SCOPE("greedyMinVehiclesInit");
+    Solution s = Solution{
+	    .routes = DynamicArray<StdAllocator, Route>(alloc, 8)
+    };
+
+    // customers are 1..n (0 is depot)
+    DynamicArray<StdAllocator, u16> customers(alloc, ins.customers.size() - 1);
+    for (u16 i = 1; i < (u16)ins.customers.size(); ++i) {
+        customers.pushBack(i);
+    }
+
+    // Heuristic ordering biased toward fewer vehicles:
+    // pack big demands early; break ties by tighter deadlines.
+    std::sort(customers.begin(), customers.end(),
+        [&](int a, int b){
+            const auto& A = ins.customers[a];
+            const auto& B = ins.customers[b];
+            if (A.demand != B.demand) return A.demand > B.demand;
+            return A.latestLeaveTime < B.latestLeaveTime;
+        });
+
+    // First-fit append: try to put each customer into an existing route (append),
+    // otherwise open a new route. This prioritizes minimizing #routes.
+    for (int c : customers)
+    {
+        bool placed = false;
+
+        for (Route& r : s.routes)
+        {
+            r.customers.pushBack(c);
+            if (evaluateRouteCost(ins, dist_mat, r) != -1)
+            {
+                placed = true;
+                break;
+            }
+            r.customers.popBack();
+        }
+
+        if (!placed)
+        {
+            Route r = {
+		    .customers = DynamicArray<StdAllocator, u16>(alloc, 8),
+		    .changed = true,
+		    .lastCost = 0.0
+	    };
+            r.customers.pushBack(c);
+            s.routes.pushBack(std::move(r));
+        }
+    }
+
+    // remove any accidental empty routes (shouldn't happen, but keep it clean)
+    //s.routes.erase(
+    //    std::remove_if(s.routes.begin(), s.routes.end(),
+    //        [](const Route& r){ return r.customers.empty(); }),
+    //    s.routes.end());
+
+    return s;
+}
 void chooseTwoNonEmptyRoutes(std::mt19937 &rng, Solution &s, int &aIdx, int &bIdx) { 
 	// NOTE(Erik): No route can every be empty! That invariant must be respected.
 
@@ -308,9 +308,11 @@ static void shiftMove_Exhaustive(
 		float *dist_mat,
 		Solution& s, 
 		TmpAllocator &tmpAlloc) {
-
     INSTRUMENT_SCOPE("shiftMove_Exhaustive");
     if (s.routes.size() < 2) return;
+
+	Solution newSolution = s;
+	float newCost = s.lastCost;
 
 	for (size_t fromIdx = 0; fromIdx < s.routes.size(); fromIdx++) {
 		Route& from = s.routes[fromIdx];
@@ -319,9 +321,6 @@ static void shiftMove_Exhaustive(
 
 		for (size_t toIdx = 0; toIdx < s.routes.size(); toIdx++) {
 			Route& to = s.routes[toIdx];
-
-			float fromOldCost = evaluateRouteCost(instance, dist_mat, from);
-			float toOldCost = evaluateRouteCost(instance, dist_mat, to);
 
 			for (size_t start = 0; start < nFrom; start++) {
 				for (size_t len = 1; len <= nFrom - start; len++) {
@@ -332,28 +331,41 @@ static void shiftMove_Exhaustive(
 					}
 					from.customers.eraseRange(start, start + len);
 
+					float fromNewCost = evaluateRouteCost(instance, dist_mat, from);
+
+					// Return to initial state.
+					from.customers.insertRangeAt(start, segment, 0, segment.size());
+
+					if (fromNewCost == -1) {
+						continue;						
+					}
+
 					for (size_t insertPos = 0; insertPos <= to.customers.size(); insertPos++) {
 						to.customers.insertRangeAt(insertPos, segment, 0, segment.size());
 
-						if (from.customers.empty()) {
-							s.routes.eraseRange(fromIdx, fromIdx + 1);
-						}
+						float toNewCost = evaluateRouteCost(instance, dist_mat, to);
 
 						// Return to initial state.
 						to.customers.eraseRange(insertPos, insertPos + segment.size());
 
-						float fromNewCost = evaluateRouteCost(instance, dist_mat, from);
-						float toNewCost = evaluateRouteCost(instance, dist_mat, to);
+						if (toNewCost == -1) {
+							continue;
+						}
 
-						oldCost += fromNewCost + toNewCost - fromOldCost - toOldCost;
+						float newPossibleCost = s.lastCost + fromNewCost + toNewCost - from.lastCost - to.lastCost;
+						if (newPossibleCost <= newCost) {
+							newSolution = s;
+							newCost = newPossibleCost;
+						}
 					}
-
-					// Return to initial state.
-					from.customers.insertRangeAt(start, segment, 0, segment.size());
 				}
 			}
 		}
 	}
+
+	// Override old solution with new solution.
+	s = std::move(newSolution);
+	s.lastCost = newCost;
 
 }
 
@@ -576,27 +588,28 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 			default: exchangeMove(rng, neighbor, tmpAlloc);
 		}
 
+		// Evaluate the neighbor
+		double score = evaluateSolution(instance, dist_mat, neighbor);
+		if (score == -1) {
+			// infeasible candidate => continue
+			continue;
+		}
+
 		// check all shifts / exchanges
-		Solution tmpBest = exchangeMove_Exhaustive(neighbor, tmpAlloc);
-		Solution shiftMoveBest = shiftMove_Exhagitustive(neighbor, tmpAlloc);
-		if (evaluateSolution( ... ) {
-			tmpBest = shiftMoveBest;
+		float lastCost = neighbor.lastCost;
+		Solution tmpNeighbor = neighbor;
+		// TODO exchangeMove_Exhaustive(tmpNeighbor, tmpAlloc);
+		shiftMove_Exhaustive(instance, dist_mat, neighbor, tmpAlloc);
+		if (tmpNeighbor.lastCost < neighbor.lastCost) {
+			neighbor = std::move(tmpNeighbor);
 		}
 
 		// check all permutations
-		Solution reorderMoveBest = reorder_Exhaustive(tmpBest, tmpAlloc);
-		if (evaluateSolution( ... ) {
-			best = shiftMoveBest;
-		}
+		/* TODO reorder_Exhaustive(neighbor, tmpAlloc);
+		if (neighbor.lastCost < lastCost) {
+			best = neighbor;
+		} */
 
-		neighbor = reorderMoveBest;	
-
-		// Evaluate the neighbor
-		double score = evaluateSolution(instance, dist_mat, neighbor);
-		if (score == -1) {
-			// infeasible candidate => continue
-			continue;
-		}
 		if (tabuList.contains(neighbor)) {
 			totalTabuHits++;
 			tabuHits++;
@@ -612,33 +625,6 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		}
 		tabuList.push(best);
 
-
-		/* 
-
-		tmpAlloc.deallocateAll(); // reset temporary allocator manually.
-		if (tabuList.contains(neighbor)) {
-			totalTabuHits++;
-			tabuHits++;
-			continue; // We skip if we already saw this solution
-		}
-
-		// Evaluate the neighbor
-		double score = evaluateSolution(instance, dist_mat, neighbor);
-		if (score == -1) {
-			// infeasible candidate => continue
-			continue;
-		}
-		// accept if equal or better to walk plateaus in solution space
-		if (score <= bestScore){
-			best=std::move(neighbor);
-			bestScore = score;
-			mutStrength = std::min(1000lu, mutStrength * 2);
-		} else {
-			mutStrength = std::max(1lu, mutStrength / 2);
-		}
-		tabuList.push(best);
-
-		*/
 	}
 
 	if(verbose)

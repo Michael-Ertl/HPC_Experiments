@@ -18,7 +18,7 @@ int main() {
 
     size_t i = 0;
     for (const auto& instance : instances) {
-        stochasticLocalSearch(instance, 12, true);
+        stochasticLocalSearch(instance, 120.0, true);
 	i++;
 	if (i > 4) break;
     }

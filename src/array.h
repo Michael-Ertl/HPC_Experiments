@@ -95,7 +95,9 @@ public:
 		other.used = 0;
 	}
 
-	DynamicArray &operator=(const DynamicArray &) = delete;
+	DynamicArray operator=(const DynamicArray &other) noexcept {
+		return DynamicArray(other);
+	}
 
 	DynamicArray &operator=(DynamicArray &&other) noexcept {
 		if (this != &other) {
