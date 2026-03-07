@@ -8,9 +8,11 @@
 #include "../utils.h"
 
 #include <algorithm>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include <chrono>
 #include <cmath>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <new>
@@ -555,7 +557,7 @@ static void init_dist_mat(const ProblemInstance &ins, float *dist_mat, size_t nu
 
 // TODO: Change print stmts to spdlogging statements for cleaner outputs.
 // TODO: add verbose parameter so benchmarks can run without console output
-double stochasticLocalSearch(const ProblemInstance& instance, const double timeLimitSeconds, bool verbose){
+OptimizationStats stochasticLocalSearch(const ProblemInstance& instance, const double timeLimitSeconds, bool verbose){
     INSTRUMENT_SCOPE("stochasticLocalSearch");
 	std::mt19937 rng(0); // random seed
 	
@@ -578,6 +580,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	init_dist_mat(instance, dist_mat, num_customers);
 
 	Solution best = greedyMinVehiclesInit(alloc, instance, dist_mat);
+	size_t initialVehicles = best.routes.size();
 	double bestScore = evaluateSolution(instance, dist_mat, best);
 
 	if(verbose)
@@ -660,6 +663,9 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		tabuList.push(best);
 
 	}
+	
+	auto endTime = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> totalElapsed = endTime - startTime;
 
 	if(verbose)
 	{
@@ -680,9 +686,56 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	}
 
 	printSolution(instance, dist_mat, best, verbose);
+	
+	// Generate timestamp
+	auto now = std::chrono::system_clock::now();
+	auto time_t_now = std::chrono::system_clock::to_time_t(now);
+	std::stringstream timestamp_ss;
+	timestamp_ss << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d %H:%M:%S");
+	
+	// Convert solution to stats format
+	std::vector<std::vector<int>> solutionRoutes;
+	for (const auto& route : best.routes) {
+		std::vector<int> routeCustomers;
+		for (auto c : route.customers) {
+			routeCustomers.push_back(instance.customers[c].id);
+		}
+		solutionRoutes.push_back(routeCustomers);
+	}
+	
+	// Convert customer coordinates (including depot at index 0)
+	std::vector<CustomerInfo> customerCoords;
+	for (const auto& customer : instance.customers) {
+		customerCoords.push_back(CustomerInfo{
+			.id = customer.id,
+			.x = customer.x,
+			.y = customer.y
+		});
+	}
+
+	OptimizationStats stats{
+		.instanceName = instance.name,
+		.timestamp = timestamp_ss.str(),
+		.initialScore = initialScore,
+		.finalScore = best.lastCost,
+		.improvement = initialScore - best.lastCost,
+		.relativeImprovement = (initialScore > 0) ? (initialScore - best.lastCost) / initialScore : 0.0,
+		.timeLimitSeconds = timeLimitSeconds,
+		.elapsedSeconds = totalElapsed.count(),
+		.iterationCount = iterationCount,
+		.mutationCount = mutations,
+		.totalTabuHits = static_cast<uint64_t>(totalTabuHits),
+		.initialVehicles = initialVehicles,
+		.finalVehicles = best.routes.size(),
+		.numCustomers = instance.customers.size() - 1,  // Exclude depot
+		.capacityPerVehicle = instance.capacityPerVehicle,
+		.feasible = true,
+		.routes = std::move(solutionRoutes),
+		.customers = std::move(customerCoords)
+	};
 
 	delete[] dist_mat;
 
-	return bestScore;
+	return stats;
 }
 

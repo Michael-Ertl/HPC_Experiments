@@ -27,7 +27,8 @@ static void BM_SLS(benchmark::State& state) {
     // Set the name as a string label
     double last_cost = 0;
     for (auto _ : state) {
-        last_cost = stochasticLocalSearch(instance, iterations);
+        OptimizationStats stats = stochasticLocalSearch(instance, iterations);
+        last_cost = stats.finalScore;
         benchmark::DoNotOptimize(last_cost);
     }
 

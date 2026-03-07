@@ -37,3 +37,8 @@ cmake --build profiler/build --parallel
 ```
 ## Comfortable Git Things
 - Usse ```git submodule update --init --recursive``` to get submodules that might be missing on your branch.
+
+python3 scripts/analyze_stats.py --mode all          # Show everything
+python3 scripts/analyze_stats.py --mode stats        # Just statistics with plots
+python3 scripts/analyze_stats.py --mode solutions      # Just solution routes
+python3 scripts/analyze_stats.py --filter c101       # Filter by instance name

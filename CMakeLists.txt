@@ -81,7 +81,7 @@ endif()
 
 # Add the core executable to the project
 add_executable(core src/entrypoint.cpp)
-target_link_libraries(core PRIVATE solver_lib)
+target_link_libraries(core PRIVATE solver_lib libsqlite)
 
 add_library(
         libsqlite
