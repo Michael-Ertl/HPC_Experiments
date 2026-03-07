@@ -72,8 +72,6 @@ else()
 	target_compile_definitions(solver_lib PUBLIC HAVE_CUDA=0)
 endif()
 
-
-
 if (ENABLE_DEBUG)
 	target_compile_definitions(solver_lib PUBLIC ENABLE_DEBUG=1)
 endif()
@@ -84,6 +82,12 @@ endif()
 # Add the core executable to the project
 add_executable(core src/entrypoint.cpp)
 target_link_libraries(core PRIVATE solver_lib)
+
+add_library(
+        libsqlite
+        submodules/sqlite-amalgamation-3510200/sqlite3.c
+)
+target_include_directories(libsqlite PUBLIC submodules/sqlite-amalgamation-3510200)
 
 # Add the tests and benchmarks to the project
 enable_testing()

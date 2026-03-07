@@ -22,11 +22,10 @@
 using namespace Allocator;
 using StdAllocator = Instrument<ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>>;
 
-using TmpAllocator = Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>; // ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>;
+using TmpAllocator = Instrument<ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>>;
 
 struct Route {
     DynamicArray<StdAllocator, u16> customers;
-    bool changed;
     double lastCost;
 
 };
@@ -100,10 +99,11 @@ struct TabuList {
 
 // returns -1 on infeasible instance
 // returns total route distance/cost otherwise
+template<bool CHANGE_ROUTE_COST = false>
 static double evaluateRouteCost(
         const ProblemInstance& instance,
 		float *dist_mat,
-        const Route& route){
+        Route& route){
 	INSTRUMENT_SCOPE("evaluateRouteCost");
 
 	int depotIdx = 0;
@@ -138,6 +138,11 @@ static double evaluateRouteCost(
 	}
 
 	distanceSum += dist_mat[previousVisitIdx * instance.customers.size() + depotIdx]; // return to depot
+
+	if constexpr (CHANGE_ROUTE_COST) {
+		route.lastCost = distanceSum;
+	}
+
 	return distanceSum;
 }
 
@@ -152,23 +157,13 @@ static double evaluateSolution(
     double total=0;
 
     for(Route &route : s.routes) {
-        double routeCost = 0;
-        if (route.changed) {
-
-            routeCost = evaluateRouteCost(ins, dist_mat, route);
-
-            if(routeCost == -1){ // route infeasible
-                return -1;
-            }
-
-            route.changed = false;
-            route.lastCost = routeCost;
-        } else {
-            routeCost = route.lastCost;
-        }
+        double routeCost = evaluateRouteCost<true>(ins, dist_mat, route);
+		if(routeCost == -1){ // route infeasible
+			return -1;
+		}
         total += routeCost;
     }
-	s.lastCost=total;
+	s.lastCost = total;
     return total;
 }
 
@@ -207,8 +202,7 @@ static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance
         for (Route& r : s.routes)
         {
             r.customers.pushBack(c);
-            if (evaluateRouteCost(ins, dist_mat, r) != -1)
-            {
+            if (evaluateRouteCost(ins, dist_mat, r) != -1) {
                 placed = true;
                 break;
             }
@@ -219,7 +213,6 @@ static Solution greedyMinVehiclesInit(StdAllocator &alloc, const ProblemInstance
         {
             Route r = {
 		    .customers = DynamicArray<StdAllocator, u16>(alloc, 8),
-		    .changed = true,
 		    .lastCost = 0.0
 	    };
             r.customers.pushBack(c);
@@ -263,9 +256,6 @@ static void shiftMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 
         const size_t nFrom = from.customers.size();
         if (nFrom == 0) return;
-
-        from.changed = true;
-        to.changed = true;
 
         std::uniform_int_distribution<size_t> startDist(0, nFrom - 1);
         size_t start = startDist(rng);
@@ -326,31 +316,26 @@ static void shiftMove_Exhaustive(
 
 					float fromNewCost = evaluateRouteCost(instance, dist_mat, from);
 
+					if (fromNewCost != -1) {
+						for (size_t insertPos = 0; insertPos <= to.customers.size(); insertPos++) {
+							to.customers.insertRangeAt(insertPos, segment, 0, segment.size());
+
+							float toNewCost = evaluateRouteCost(instance, dist_mat, to);
+							if (toNewCost != -1) {
+								float newPossibleCost = s.lastCost + fromNewCost + toNewCost - from.lastCost - to.lastCost;
+								if (newPossibleCost <= newCost) {
+									newSolution = s;
+									newCost = newPossibleCost;
+								}
+							}
+
+							// Return to initial state.
+							to.customers.eraseRange(insertPos, insertPos + segment.size());
+						}
+					}
+
 					// Return to initial state.
 					from.customers.insertRangeAt(start, segment, 0, segment.size());
-
-					if (fromNewCost == -1) {
-						continue;						
-					}
-
-					for (size_t insertPos = 0; insertPos <= to.customers.size(); insertPos++) {
-						to.customers.insertRangeAt(insertPos, segment, 0, segment.size());
-
-						float toNewCost = evaluateRouteCost(instance, dist_mat, to);
-
-						// Return to initial state.
-						to.customers.eraseRange(insertPos, insertPos + segment.size());
-
-						if (toNewCost == -1) {
-							continue;
-						}
-
-						float newPossibleCost = s.lastCost + fromNewCost + toNewCost - from.lastCost - to.lastCost;
-						if (newPossibleCost <= newCost) {
-							newSolution = s;
-							newCost = newPossibleCost;
-						}
-					}
 				}
 			}
 		}
@@ -358,6 +343,9 @@ static void shiftMove_Exhaustive(
 
 	// Override old solution with new solution.
 	s = std::move(newSolution);
+	for (size_t i = 0; i < s.routes.size(); i++) {
+		evaluateRouteCost<true>(instance, dist_mat, s.routes[i]);
+	}
 	s.lastCost = newCost;
 
 }
@@ -377,9 +365,6 @@ static void exchangeMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 
         Route& A = s.routes[aIdx];
         Route& B = s.routes[bIdx];
-
-        A.changed = true;
-        B.changed = true;
 
         const size_t nA = A.customers.size();
         const size_t nB = B.customers.size();
@@ -438,8 +423,6 @@ static void reorderMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 		std::uniform_int_distribution<int> rPick(0, (int)candidates.size() - 1);
 		Route *r = &s.routes[candidates[rPick(rng)]];
 
-		r->changed = true;
-
 		const size_t n = r->customers.size();
 		if (n < 2) return;
 
@@ -464,56 +447,62 @@ static void reorderMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 	}
 }
 
-static void reorderExhaustive(const ProblemInstance& instance, float* dist_mat, Solution& candidate, TmpAllocator &tmpAlloc) {
-		INSTRUMENT_SCOPE("candidate_selection");
-		DynamicArray<TmpAllocator, int> candidates(tmpAlloc, candidate.routes.size());
+static void reorder_Exhaustive(const ProblemInstance& instance, float* dist_mat, Solution& candidate, TmpAllocator &tmpAlloc) {
+	INSTRUMENT_SCOPE("candidate_selection");
+	DynamicArray<TmpAllocator, int> candidates(tmpAlloc, candidate.routes.size());
 
-
-		for (int i = 0; i < (int)candidate.routes.size(); ++i) {
-			if ((int)candidate.routes[i].customers.size() >= 2) {
-				candidates.pushBack(i);
-			}
+	for (int i = 0; i < (int)candidate.routes.size(); ++i) {
+		if ((int)candidate.routes[i].customers.size() >= 2) {
+			candidates.pushBack(i);
 		}
+	}
 
-		if (candidates.empty()) return;
-		// Sanitity Checks done
-		// continue to check all permutations...
+	if (candidates.empty()) return;
+	// Sanitity Checks done
+	// continue to check all permutations...
 
 	Solution outputSolution = candidate;
 	double bestCost = candidate.lastCost;
 
-	for (int j :candidates) {
-				Route &r = candidate.routes[j];
-				for (int start =0; start < (int)r.customers.size(); ++start) {
-					for (int len = 0; len < (int)r.customers.size() - start; ++len) {
-						DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
-						for (size_t i = 0; i < len; ++i) {
-							segment.pushBack(r.customers[start + i]);
-						}
-						r.customers.eraseRange(start, start + len);
-						for (int newPos = 0; newPos <= (int)r.customers.size(); ++newPos) {
-							r.customers.insertRangeAt(newPos, segment, 0, segment.size());
+	for (int j : candidates) {
+		Route &r = candidate.routes[j];
+		for (int start =0; start < (int)r.customers.size(); ++start) {
+			for (int len = 1; len <= (int)r.customers.size() - start; ++len) {
 
-							double lastRouteCost =  r.lastCost;
-							double newRouteCost = evaluateRouteCost(instance, dist_mat, r);
-							double newCost = candidate.lastCost + newRouteCost - lastRouteCost;
-
-							if (newCost <= bestCost) {
-								bestCost = newCost;
-								outputSolution = candidate;
-
-							}
-
-							r.customers.eraseRange(newPos, newPos + segment.size());
-
-
-						}
-						r.customers.insertRangeAt(start, segment, 0, len);
-					}
+				DynamicArray<TmpAllocator, u16> segment(tmpAlloc, len);
+				for (size_t i = 0; i < len; ++i) {
+					segment.pushBack(r.customers[start + i]);
 				}
-		candidate = std::move(outputSolution);
-		candidate.lastCost = bestCost;
+
+				r.customers.eraseRange(start, start + len);
+
+				for (int newPos = 0; newPos <= (int)r.customers.size(); ++newPos) {
+					r.customers.insertRangeAt(newPos, segment, 0, segment.size());
+
+					double lastRouteCost =  r.lastCost;
+					double newRouteCost = evaluateRouteCost(instance, dist_mat, r);
+					if (newRouteCost != -1) {
+						double newCost = candidate.lastCost + newRouteCost - lastRouteCost;
+
+						if (newCost <= bestCost) {
+							bestCost = newCost;
+							outputSolution = candidate;
+						}
+					}
+
+					r.customers.eraseRange(newPos, newPos + segment.size());
+				}
+
+				r.customers.insertRangeAt(start, segment, 0, len);
+			}
+		}
 	}
+
+	candidate = std::move(outputSolution);
+	for (size_t i = 0; i < candidate.routes.size(); i++) {
+		evaluateRouteCost<true>(instance, dist_mat, candidate.routes[i]);
+	}
+	candidate.lastCost = bestCost;
 }
 
 
@@ -578,7 +567,11 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	auto eFence = ElectricFence<decltype(fallback)>(fallback);
 	StdAllocator alloc = Instrument<decltype(eFence)>(eFence);
 
-	TmpAllocator tmpAlloc; // = // ElectricFence<decltype(fallback)>(fallback_);
+	A1 a1_;
+	A2 a2_;
+	Fallback<A1, A2> fallback_ = Fallback(a1_, a2_);
+	auto eFence_ = ElectricFence<decltype(fallback)>(fallback_);
+	TmpAllocator tmpAlloc = Instrument<decltype(eFence_)>(eFence_);
 
 	size_t num_customers = instance.customers.size();
 	float *dist_mat = new float[num_customers * num_customers];
@@ -638,6 +631,7 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		}
 
 		// check all shifts / exchanges
+		float lastCost = neighbor.lastCost;
 		Solution tmpNeighbor = neighbor;
 		// TODO exchangeMove_Exhaustive(tmpNeighbor, tmpAlloc);
 		shiftMove_Exhaustive(instance, dist_mat, neighbor, tmpAlloc);
@@ -646,10 +640,10 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 		}
 
 		// check all permutations
-		/* TODO reorder_Exhaustive(neighbor, tmpAlloc);
+		reorder_Exhaustive(instance, dist_mat, neighbor, tmpAlloc);
 		if (neighbor.lastCost < lastCost) {
 			best = neighbor;
-		} */
+		}
 
 		if (tabuList.contains(neighbor)) {
 			totalTabuHits++;
@@ -657,9 +651,8 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 			continue; // We skip if we already saw this solution
 		}
 		// accept if equal or better to walk plateaus in solution space
-		if (score <= bestScore){
-			best=std::move(neighbor);
-			bestScore = score;
+		if (neighbor.lastCost <= best.lastCost) {
+			best = std::move(neighbor);
 			mutStrength = std::min(1000lu, mutStrength * 2);
 		} else {
 			mutStrength = std::max(1lu, mutStrength / 2);
@@ -671,8 +664,8 @@ double stochasticLocalSearch(const ProblemInstance& instance, const double timeL
 	if(verbose)
 	{
 		spdlog::info(
-		"Best Score {} | Improvement {}",bestScore,
-		initialScore - bestScore);
+		"Best Score {} | Improvement {}", best.lastCost,
+		initialScore - best.lastCost);
 
 		spdlog::info(
 			"TotalTabuHits {}",totalTabuHits);

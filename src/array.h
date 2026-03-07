@@ -95,8 +95,23 @@ public:
 		other.used = 0;
 	}
 
-	DynamicArray operator=(const DynamicArray &other) noexcept {
-		return DynamicArray(other);
+	DynamicArray &operator=(const DynamicArray &other) noexcept {
+		if (this != &other) {
+			if (block.ptr != nullptr) {
+				destroyElements(0, used);
+				a.deallocate(block);
+			}
+			if (other.used > 0) {
+				block = a.allocate(other.block.size);	
+				used = other.used;
+				std::uninitialized_copy(other.block.ptr, other.block.ptr + used, block.ptr);
+			} else {
+				block.ptr = nullptr;
+				block.size = 0;
+				used = 0;
+			}
+		}
+		return *this;
 	}
 
 	DynamicArray &operator=(DynamicArray &&other) noexcept {
@@ -217,21 +232,6 @@ public:
 			}
 		}
 
-		// TODO: Incomplete.
-		if constexpr (std::is_same_v<typeof(*this), typeof(other)>) {
-			if (this == &other) {
-				if (insertPos >= endExclusive) {
-					// Nothing to do here.
-				} else if (insertPos < startInclusive) {
-					startInclusive += count;
-					endExclusive += count;
-				} else {
-					LOG_ERROR("insertRangeAt: Overlapping sections are not supported.");
-					return;
-				}
-			}
-		}
-		
 		// Copy from other
 		for (size_t i = 0; i < count; ++i) {
 			size_t dest = insertPos + i;
@@ -242,17 +242,6 @@ public:
 			}
 		}
 
-		// TODO: Incomplete.
-		if constexpr (std::is_same_v<typeof(*this), typeof(other)>) {
-			if (this == &other) {
-				if (insertPos >= endExclusive) {
-					eraseRange(startInclusive + count, endExclusive + count);
-				} else if (insertPos < startInclusive) {
-					eraseRange(startInclusive, endExclusive);
-				}
-			}
-		}
-		
 		used = oldUsed + count;
 	}
 
