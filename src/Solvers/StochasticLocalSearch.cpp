@@ -20,6 +20,8 @@
 #include <type_traits>
 #include <spdlog/spdlog.h>
 #include <iostream>
+#include <omp.h>
+
 
 using namespace Allocator;
 using StdAllocator = Instrument<ElectricFence<Fallback<Allocator::Freelist<Allocator::Contiguous<4096 * 4>, 0, 256, Allocator::NoStorage>, Allocator::Malloc>>>;
@@ -168,6 +170,147 @@ static double evaluateSolution(
 	s.lastCost = total;
     return total;
 }
+
+// ------------------------------------------------------------
+// SWEEP INITIALIZATION
+// ------------------------------------------------------------
+Solution sweepInitialization(
+	StdAllocator &alloc,
+	const ProblemInstance& ins,
+	float* dist_mat)
+{
+	Solution s{
+		.routes = DynamicArray<StdAllocator, Route>(alloc, 8)
+	};
+
+	struct AngleCustomer {
+		int id;
+		double angle;
+	};
+
+	std::vector<AngleCustomer> customers;
+
+	const Customer& depot = ins.customers[0];
+
+	for (size_t i = 1; i < ins.customers.size(); ++i)
+	{
+		const Customer& c = ins.customers[i];
+		double angle = atan2(c.y - depot.y, c.x - depot.x);
+		customers.push_back({(int)i, angle});
+	}
+
+	std::sort(customers.begin(), customers.end(),
+			  [](auto &a, auto &b) { return a.angle < b.angle; });
+
+	Route current{
+		.customers = DynamicArray<StdAllocator, u16>(alloc, 8)
+	};
+
+	for (auto &c : customers)
+	{
+		current.customers.pushBack(c.id);
+
+		if (evaluateRouteCost(ins, dist_mat, current) == -1)
+		{
+			current.customers.popBack();
+
+			s.routes.pushBack(std::move(current));
+
+			current = {
+				.customers = DynamicArray<StdAllocator, u16>(alloc, 8)
+			};
+
+			current.customers.pushBack(c.id);
+		}
+	}
+
+	if (!current.customers.empty())
+		s.routes.pushBack(std::move(current));
+
+	return s;
+}
+
+Solution solomonInsertionInitialization(
+	StdAllocator &alloc,
+	const ProblemInstance& ins,
+	float* dist_mat)
+{
+	Solution s{
+		.routes = DynamicArray<StdAllocator, Route>(alloc, 8)
+	};
+
+	std::vector<int> unrouted;
+
+	for (size_t i = 1; i < ins.customers.size(); ++i)
+		unrouted.push_back(i);
+
+	while (!unrouted.empty())
+	{
+		Route r{
+			.customers = DynamicArray<StdAllocator, u16>(alloc, 8)
+		};
+
+		r.customers.pushBack(unrouted.back());
+		unrouted.pop_back();
+
+		bool improved = true;
+
+		while (improved && !unrouted.empty())
+		{
+			improved = false;
+
+			double bestCost = std::numeric_limits<double>::max();
+			int bestCustomer = -1;
+			int bestPos = -1;
+
+			for (int c : unrouted)
+			{
+				DynamicArray<StdAllocator, u16> temp(alloc, 1);
+				temp.pushBack((u16)c);
+				
+				for (size_t pos = 0; pos <= r.customers.size(); ++pos)
+				{
+					r.customers.insertRangeAt(pos, temp, 0, 1);
+
+					double cost = evaluateRouteCost(ins, dist_mat, r);
+
+					if (cost != -1 && cost < bestCost)
+					{
+						bestCost = cost;
+						bestCustomer = c;
+						bestPos = pos;
+					}
+
+					r.customers.eraseRange(pos, pos + 1);
+				}
+			}
+
+			if (bestCustomer != -1)
+			{
+				DynamicArray<StdAllocator, u16> toInsert(alloc, 1);
+				toInsert.pushBack((u16)bestCustomer);
+				r.customers.insertRangeAt(bestPos, toInsert, 0, 1);
+
+				unrouted.erase(
+					std::remove(unrouted.begin(), unrouted.end(), bestCustomer),
+					unrouted.end());
+
+				improved = true;
+			}
+		}
+
+		s.routes.pushBack(std::move(r));
+	}
+	return s;
+}
+
+
+
+
+
+
+
+
 
 
 
@@ -405,6 +548,57 @@ static void exchangeMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
     }
 }
 
+
+// --- EXCHANGE operator: swap two non-empty segments between two routes ---
+static void exchangeMove_Exhaustive(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
+{
+    INSTRUMENT_SCOPE("exchangeMove");
+    if (s.routes.size() < 2) return;
+
+    int aIdx = -1, bIdx;
+    chooseTwoNonEmptyRoutes(rng, s, aIdx, bIdx);
+    if (aIdx == -1) return;
+    if (aIdx == bIdx) return;
+
+    Route& A = s.routes[aIdx];
+    Route& B = s.routes[bIdx];
+
+    const size_t nA = A.customers.size();
+    const size_t nB = B.customers.size();
+    if (nA == 0 || nB == 0) return;
+
+    std::uniform_int_distribution<size_t> aStartDist(0, nA - 1);
+    size_t aStart = aStartDist(rng);
+    std::uniform_int_distribution<size_t> aLenDist(1, nA - aStart);
+    size_t aLen = aLenDist(rng);
+
+    std::uniform_int_distribution<size_t> bStartDist(0, nB - 1);
+    size_t bStart = bStartDist(rng);
+    std::uniform_int_distribution<size_t> bLenDist(1, nB - bStart);
+    size_t bLen = bLenDist(rng);
+
+    {
+        INSTRUMENT_SCOPE("segment_swap");
+        A.customers.insertRangeAt(aStart, B.customers, bStart, bStart + bLen);
+        B.customers.insertRangeAt(bStart, A.customers, aStart + bLen, aStart + bLen + aLen);
+        A.customers.eraseRange(aStart + bLen, aStart + bLen + aLen);
+        B.customers.eraseRange(bStart + aLen, bStart + aLen + bLen);
+    }
+
+    {
+        INSTRUMENT_SCOPE("cleanup");
+        if (A.customers.empty() || B.customers.empty()) {
+            if (aIdx > bIdx) {
+                if (A.customers.empty()) s.routes.eraseRange(aIdx, aIdx + 1);
+                if (B.customers.empty()) s.routes.eraseRange(bIdx, bIdx + 1);
+            } else {
+                if (B.customers.empty()) s.routes.eraseRange(bIdx, bIdx + 1);
+                if (A.customers.empty()) s.routes.eraseRange(aIdx, aIdx + 1);
+            }
+        }
+    }
+}
+
 // --- REORDER (rearrange) operator: reposition a non-empty segment within one route ---
 static void reorderMove(std::mt19937& rng, Solution& s, TmpAllocator &tmpAlloc)
 {
@@ -579,7 +773,7 @@ OptimizationStats stochasticLocalSearch(const ProblemInstance& instance, const d
 	float *dist_mat = new float[num_customers * num_customers];
 	init_dist_mat(instance, dist_mat, num_customers);
 
-	Solution best = greedyMinVehiclesInit(alloc, instance, dist_mat);
+	Solution best = sweepInitialization(alloc, instance, dist_mat);
 	size_t initialVehicles = best.routes.size();
 	double bestScore = evaluateSolution(instance, dist_mat, best);
 
@@ -604,66 +798,6 @@ OptimizationStats stochasticLocalSearch(const ProblemInstance& instance, const d
 
 	int totalTabuHits =0;
 	int tabuHits = 0;
-	while (true) {
-		INSTRUMENT_SCOPE("SLS_iteration");
-		auto currentTime = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<double> elapsed = currentTime - startTime;
-		if (elapsed.count() >= timeLimitSeconds) {
-			break;
-		}
-		
-		iterationCount++;
-		Solution neighbor = best;
-
-		// Choose the correct mutation operator
-		switch(std::uniform_int_distribution op(0,1); op(rng)) {
-			case 0:
-				exchangeMove(rng, neighbor, tmpAlloc);
-				break;
-			case 1:
-				shiftMove(rng, neighbor, tmpAlloc);
-				break;
-			default: exchangeMove(rng, neighbor, tmpAlloc);
-		}
-
-		// Evaluate the neighbor
-		double score = evaluateSolution(instance, dist_mat, neighbor);
-		if (score == -1) {
-			// infeasible candidate => continue
-			continue;
-		}
-
-		// check all shifts / exchanges
-		float lastCost = neighbor.lastCost;
-		Solution tmpNeighbor = neighbor;
-		// TODO exchangeMove_Exhaustive(tmpNeighbor, tmpAlloc);
-		shiftMove_Exhaustive(instance, dist_mat, neighbor, tmpAlloc);
-		if (tmpNeighbor.lastCost < neighbor.lastCost) {
-			neighbor = std::move(tmpNeighbor);
-		}
-
-		// check all permutations
-		reorder_Exhaustive(instance, dist_mat, neighbor, tmpAlloc);
-		if (neighbor.lastCost < lastCost) {
-			best = neighbor;
-		}
-
-		if (tabuList.contains(neighbor)) {
-			totalTabuHits++;
-			tabuHits++;
-			continue; // We skip if we already saw this solution
-		}
-		// accept if equal or better to walk plateaus in solution space
-		if (neighbor.lastCost <= best.lastCost) {
-			best = std::move(neighbor);
-			mutStrength = std::min(1000lu, mutStrength * 2);
-		} else {
-			mutStrength = std::max(1lu, mutStrength / 2);
-		}
-		tabuList.push(best);
-
-	}
-	
 	auto endTime = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> totalElapsed = endTime - startTime;
 

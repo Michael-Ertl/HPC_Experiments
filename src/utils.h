@@ -7,7 +7,7 @@
 #include <string>
 #include <variant>
 
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 #ifdef TRACY_ENABLE
 #include "tracy/Tracy.hpp"

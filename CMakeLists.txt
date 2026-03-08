@@ -12,6 +12,8 @@ project(hpc VERSION 1.0
 # Gather local dependencies
 find_package(CUDAToolkit QUIET)
 #find_package(CUDAToolkit REQUIRED)
+find_package(OpenMP REQUIRED)
+
 
 # OR-Tools (prebuilt binary)
 set(ORTOOLS_ROOT "${CMAKE_SOURCE_DIR}/submodules/or-tools_x86_64_Ubuntu-24.04_cpp_v9.15.6755")
@@ -31,6 +33,7 @@ set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
 set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(SPDLOG_BUILD_PIC ON CACHE BOOL "" FORCE)
+include_directories(SPDLOG_SUBMODULE_DIR)
 add_subdirectory("${SPDLOG_SUBMODULE_DIR}" EXCLUDE_FROM_ALL) # EXCLUDE_FROM_ALL means it doesn't compile unless the lib is linked into the program.
 
 # Compile the src code into a static library
@@ -48,10 +51,12 @@ add_library(solver_lib
         src/problem_instance.cpp
         src/allocators.cpp
         src/Solvers/StochasticLocalSearch.cpp
+        src/Solvers/LocalSearchDescent.cpp
+        src/Solvers/InsertionHeuristicComparison.cpp
 )
 target_include_directories(solver_lib PUBLIC src/)
 #target_include_directories(solver_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
-target_link_libraries(solver_lib PUBLIC spdlog::spdlog)
+target_link_libraries(solver_lib PUBLIC spdlog::spdlog OpenMP::OpenMP_CXX)
 #target_link_libraries(solver_lib PUBLIC CUDA::cuda_driver CUDA::cudart)
 target_compile_definitions(solver_lib PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
 
@@ -80,8 +85,14 @@ if (ENABLE_PROFILER)
 endif()
 
 # Add the core executable to the project
-add_executable(core src/entrypoint.cpp)
+add_executable(core src/entrypoint.cpp
+)
 target_link_libraries(core PRIVATE solver_lib libsqlite)
+
+# Add the insertion heuristic comparison executable
+add_executable(compare_heuristics src/Solvers/InsertionHeuristicComparison.cpp
+)
+target_link_libraries(compare_heuristics PRIVATE solver_lib)
 
 add_library(
         libsqlite

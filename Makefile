@@ -1,4 +1,4 @@
-.PHONY: prepare-debug prepare-release build
+.PHONY: prepare-debug prepare-release build visualize-init visualize-init-%
 
 debug-run: prepare-debug build run-program
 
@@ -17,6 +17,9 @@ build:
 run-program:
 	./build/core
 
+run-comparison:
+	./build/compare_heuristics
+
 run-tests:
 	./build/tests/unit_tests
 
@@ -33,6 +36,12 @@ visualize-cachegrind:
 
 ANALYSIS_DIR := analysis
 FLAMEGRAPH := submodules/FlameGraph
+visualize-init:
+	python3 scripts/visualize_init_solutions.py --instance c101
+
+visualize-init-%:
+	python3 scripts/visualize_init_solutions.py --instance $*
+
 perf-timeline: prepare-release build
 	mkdir -p $(ANALYSIS_DIR)
 	# record performance data

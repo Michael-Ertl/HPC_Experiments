@@ -7,6 +7,9 @@
 #include "./Solvers/StochasticLocalSearch.h"
 #include "./problem_instance.h"
 #include <spdlog/spdlog.h>
+#include <spdlog/spdlog.h>
+
+#include "Solvers/LocalSearchDescent.h"
 
 static int callback(void *NotUsed, int argc, char **argv, char **azColName) {
    for(int i = 0; i < argc; i++) {
@@ -150,18 +153,27 @@ int main() {
     size_t i = 0;
     for (const auto& instance : instances) {
         LOG_INFO("Processing instance {}/{}: {}", i + 1, instances.size(), instance.name);
-        
+        /*
         OptimizationStats stats = stochasticLocalSearch(instance, 120.0, true);
         
         // Insert stats into database
         insertStats(db, stats);
-        
-        LOG_INFO("Completed instance {}: Initial={}, Final={}, Improvement={:.2f}%", 
-                 stats.instanceName, stats.initialScore, stats.finalScore, 
-                 stats.relativeImprovement * 100.0);
-        
+        */
+
+        LocalSearchDescentContext localSearchDescentResult = localSearchDescentRun(instance);
+
+
+        //LOG_INFO("Completed instance {}: Initial={}, Final={}, Improvement={:.2f}%", stats.instanceName, stats.initialScore, stats.finalScore,  stats.relativeImprovement * 100.0);
+        LOG_INFO("Completed instance {}: Initial={}, Final={}, Improvement={:.2f}",
+            instance.name, localSearchDescentResult.initialCost,
+            localSearchDescentResult.currentCost,
+            localSearchDescentResult.currentCost - localSearchDescentResult.initialCost);
+
+
+
+
 		i++;
-		break;
+
     }
     
     // Close database
