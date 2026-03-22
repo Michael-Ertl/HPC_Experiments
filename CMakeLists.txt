@@ -53,6 +53,7 @@ add_library(solver_lib
         src/Solvers/StochasticLocalSearch.cpp
         src/Solvers/LocalSearchDescent.cpp
         src/Solvers/InsertionHeuristicComparison.cpp
+		src/ParallelizedSolvers/ParallelLSD.cpp
 )
 target_include_directories(solver_lib PUBLIC src/)
 #target_include_directories(solver_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})

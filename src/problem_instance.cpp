@@ -52,7 +52,7 @@ std::vector<ProblemInstance> readAllInstances(const std::string &directory) {
     std::vector<ProblemInstance> instances;
 
     for (const auto &entry : std::filesystem::directory_iterator(directory)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".txt") {
+        if (entry.is_regular_file() && entry.path().extension() == ".txt" || entry.is_regular_file() && entry.path().extension() == ".TXT") {
             instances.push_back(readInstance(entry.path().string()));
         }
     }

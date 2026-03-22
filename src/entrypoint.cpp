@@ -10,6 +10,9 @@
 #include <spdlog/spdlog.h>
 
 #include "Solvers/LocalSearchDescent.h"
+#include <filesystem>
+
+#include "ParallelizedSolvers/ParallelLSD.h"
 
 static int callback(void *NotUsed, int argc, char **argv, char **azColName) {
    for(int i = 0; i < argc; i++) {
@@ -146,9 +149,10 @@ int main() {
     
     // Initialize database schema
     initDatabase(db);
-
+    std::filesystem::path projectRoot = std::filesystem::current_path();
+    LOG_INFO("Project root: {}", projectRoot.string());
     std::vector<ProblemInstance> instances =
-        readAllInstances("./benchmark_instances");
+        readAllInstances(std::string(projectRoot) + "/benchmark_instances/100_Customers");
 
     size_t i = 0;
     for (const auto& instance : instances) {
@@ -159,21 +163,23 @@ int main() {
         // Insert stats into database
         insertStats(db, stats);
         */
+        // LocalSearchDescentContext localSearchDescentResult = localSearchDescentRun(instance);
 
-        LocalSearchDescentContext localSearchDescentResult = localSearchDescentRun(instance);
-
+        runParallelLSD(instance, 8, false);
 
         //LOG_INFO("Completed instance {}: Initial={}, Final={}, Improvement={:.2f}%", stats.instanceName, stats.initialScore, stats.finalScore,  stats.relativeImprovement * 100.0);
-        LOG_INFO("Completed instance {}: Initial={}, Final={}, Improvement={:.2f}",
-            instance.name, localSearchDescentResult.initialCost,
-            localSearchDescentResult.currentCost,
-            localSearchDescentResult.currentCost - localSearchDescentResult.initialCost);
-
+        // LOG_INFO("Completed instance {}: Initial={}, Final={}, Improvement={:.2f}",
+        //     instance.name, localSearchDescentResult.initialCost,
+        //     localSearchDescentResult.currentCost,
+        //     localSearchDescentResult.currentCost - localSearchDescentResult.initialCost);
+        //
 
 
 
 		i++;
-
+        if (i>10) {
+            break;
+        }
     }
     
     // Close database
