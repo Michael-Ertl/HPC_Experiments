@@ -3,7 +3,7 @@
 debug-run: prepare-debug build run-program
 
 prepare-debug:
-	cmake -B build -DCMAKE_BUILD_TYPE=Debug
+	cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 prepare-release:
 	cmake -B build -DCMAKE_BUILD_TYPE=Release
